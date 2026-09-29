@@ -16,16 +16,17 @@ import { ApplicationService } from "@/features/applications/application.service"
 import { StatusBadge } from "@/components/admin/status-badge";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { DashboardStatsCards } from "@/components/dashboard/stats-cards";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboardPage() {
   let stats: any = {
     totalApplications: 0,
-    pendingRequests: 0,
-    underReviewRequests: 0,
-    approvedCertificates: 0,
-    rejectedRequests: 0,
+    pendingReview: 0,
+    approved: 0,
+    rejected: 0,
+    certificatesIssued: 0,
     recentApplications: [],
     recentCertificates: [],
     recentAuditLogs: [],
@@ -36,42 +37,6 @@ export default async function AdminDashboardPage() {
   } catch (err) {
     console.error("Dashboard fetch error:", err);
   }
-
-  const statCards = [
-    {
-      title: "Total Applications",
-      value: stats.totalApplications,
-      icon: FileText,
-      color: "text-blue-400",
-      bgColor: "bg-blue-500/10",
-      borderColor: "border-blue-500/30",
-    },
-    {
-      title: "Pending Requests",
-      value: stats.pendingRequests,
-      icon: Clock,
-      color: "text-amber-400",
-      bgColor: "bg-amber-500/10",
-      borderColor: "border-amber-500/30",
-      highlight: true,
-    },
-    {
-      title: "Approved Certificates",
-      value: stats.approvedCertificates,
-      icon: CheckCircle2,
-      color: "text-emerald-400",
-      bgColor: "bg-emerald-500/10",
-      borderColor: "border-emerald-500/30",
-    },
-    {
-      title: "Rejected Requests",
-      value: stats.rejectedRequests,
-      icon: XCircle,
-      color: "text-rose-400",
-      bgColor: "bg-rose-500/10",
-      borderColor: "border-rose-500/30",
-    },
-  ];
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -94,7 +59,7 @@ export default async function AdminDashboardPage() {
         <div className="flex items-center gap-3">
           <Link href="/admin/applications?status=PENDING">
             <Button variant="gold" size="sm" className="font-semibold">
-              Review Pending ({stats.pendingRequests})
+              Review Pending ({stats.pendingReview || stats.pendingRequests || 0})
               <ArrowRight className="h-4 w-4 ml-1.5" />
             </Button>
           </Link>
@@ -102,34 +67,15 @@ export default async function AdminDashboardPage() {
       </div>
 
       {/* KPI Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              key={card.title}
-              className={`p-6 rounded-2xl border bg-slate-900/80 backdrop-blur-sm shadow-xl flex items-center justify-between transition-all hover:translate-y-[-2px] ${
-                card.highlight ? "border-amber-500/40 ring-1 ring-amber-500/20" : "border-slate-800"
-              }`}
-            >
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  {card.title}
-                </p>
-                <p className="text-3xl font-extrabold text-white mt-1 font-mono">
-                  {card.value}
-                </p>
-              </div>
-
-              <div
-                className={`h-12 w-12 rounded-xl flex items-center justify-center border ${card.bgColor} ${card.borderColor} ${card.color}`}
-              >
-                <Icon className="h-6 w-6" />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <DashboardStatsCards
+        stats={{
+          totalApplications: stats.totalApplications || 0,
+          pendingReview: stats.pendingReview || stats.pendingRequests || 0,
+          approved: stats.approved || 0,
+          rejected: stats.rejected || stats.rejectedRequests || 0,
+          certificatesIssued: stats.certificatesIssued || stats.approvedCertificates || 0,
+        }}
+      />
 
       {/* Two Columns: Recent Applications & Recent Certificates */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

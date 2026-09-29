@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wbre-admin-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-wbore}?schema=public
+      - JWT_SECRET=${JWT_SECRET:-wbre-super-secure-jwt-secret-key-32-chars-min-prod}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      - STORAGE_DRIVER=LOCAL
+      - STORAGE_LOCAL_DIR=/app/public/uploads
+      - RUN_SEED=${RUN_SEED:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - wbre_uploads:/app/public/uploads
+    networks:
+      - wbre-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: wbre-postgres-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${DB_NAME:-wbore}
+    volumes:
+      - wbre_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-wbore}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wbre-network
+
+volumes:
+  wbre_uploads:
+    driver: local
+  wbre_pgdata:
+    driver: local
+
+networks:
+  wbre-network:
+    driver: bridge

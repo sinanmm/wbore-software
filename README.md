@@ -20,7 +20,7 @@ A production-ready Certificate Management and Record Adjudication platform built
   - **Right Column**: Adjudication action controls (**Approve Certificate**, **Reject Application**, **Request More Information**) and confidential internal review notes with persistence.
 - **`/admin/certificates`**: Central certificate registry with preview, search, and high-resolution PDF download streaming.
 - **`/admin/verification`**: Real-time audit logs of global certificate verification attempts with IP tracking and timestamps.
-- **`/admin/users`**: Administrator accounts, role management (`SUPER_ADMIN`, `ADMIN`, `REVIEWER`).
+- **`/admin/users`**: Administrator accounts, role management (`SUPER_ADMIN`, `ADMIN`, `VERIFICATION_OFFICER`).
 - **`/admin/settings`**: Dynamic engine inspection displaying exact vector typography coordinates configured in `certificate-template.ts`.
 
 ### 3. Reusable Certificate Generation Engine
@@ -28,7 +28,7 @@ A production-ready Certificate Management and Record Adjudication platform built
 - **Coordinate Configuration**: `certificate-template.ts` defines pixel-accurate coordinates for:
   - Recipient Name (Center aligned, dynamic font autosizing, background-matched watermark neutralization).
   - Category, Achievement Title, Place, Record ID, Certificate Number, Recognition Date.
-  - Verification QR Code.
+  - Verification QR Code linking to verification portal.
 - **Vector Overlay**: Utilizes `pdf-lib` for high-resolution, vector-crisp typography and fast server-side PDF rendering.
 
 ---
@@ -42,8 +42,8 @@ cp .env.example .env
 ```
 Configure your PostgreSQL connection string:
 ```env
-DATABASE_URL="postgresql://postgres:password@localhost:5432/wbore?schema=public"
-JWT_SECRET="your-strong-random-jwt-secret-key"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/wbore?schema=public"
+JWT_SECRET="your-strong-random-jwt-secret-key-32-chars-min"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 STORAGE_DRIVER="LOCAL"
 ```
@@ -59,9 +59,10 @@ npx prisma generate
 npx prisma db push
 npm run db:seed
 ```
-Default administrator credentials seeded:
-- **Email**: `admin@wbore.org`
-- **Password**: `admin123`
+Default accounts seeded (Password for all: `admin123`):
+- **Super Administrator**: `superadmin@wbre.org` (Role: `SUPER_ADMIN`)
+- **Admin Adjudicator**: `admin@wbre.org` (Role: `ADMIN`)
+- **Verification Officer**: `verify@wbre.org` (Role: `VERIFICATION_OFFICER`)
 
 ### 4. Development Server
 ```bash

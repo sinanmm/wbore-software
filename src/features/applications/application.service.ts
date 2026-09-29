@@ -239,8 +239,9 @@ export class ApplicationService {
       totalApplications,
       pendingRequests,
       underReviewRequests,
-      approvedCertificates,
+      certificatesIssued,
       rejectedRequests,
+      approvedRequests,
       recentApplications,
       recentCertificates,
       recentAuditLogs,
@@ -250,6 +251,7 @@ export class ApplicationService {
       db.application.count({ where: { status: "UNDER_REVIEW" } }),
       db.certificate.count(),
       db.application.count({ where: { status: "REJECTED" } }),
+      db.application.count({ where: { status: { in: ["APPROVED", "CERTIFICATE_GENERATED"] } } }),
       db.application.findMany({
         orderBy: { createdAt: "desc" },
         take: 6,
@@ -271,11 +273,19 @@ export class ApplicationService {
       }),
     ]);
 
+    const pendingReview = pendingRequests + underReviewRequests;
+    const approved = approvedRequests;
+    const rejected = rejectedRequests;
+
     return {
       totalApplications,
+      pendingReview,
+      approved,
+      rejected,
+      certificatesIssued,
       pendingRequests,
       underReviewRequests,
-      approvedCertificates,
+      approvedCertificates: certificatesIssued,
       rejectedRequests,
       recentApplications,
       recentCertificates,

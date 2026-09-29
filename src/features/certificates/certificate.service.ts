@@ -91,6 +91,8 @@ export class CertificateService {
         place: application.place,
         issueDate: new Date(),
         pdfUrl,
+        certificatePdfUrl: pdfUrl,
+        verificationStatus: "VALID",
         qrCodeUrl: qrCodeDataUrl,
         verificationUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://wbre.org"}/verify?recordId=${recordId}`,
       },

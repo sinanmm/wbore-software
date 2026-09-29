@@ -10,7 +10,7 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
-  REVIEWER
+  VERIFICATION_OFFICER
 }
 
 enum ApplicationStatus {
@@ -42,13 +42,13 @@ model Application {
   applicantPhone     String
   country            String
   address            String
-  category           String            // e.g. Science & Technology, Sports, Arts, etc.
+  category           String            // e.g. Technology & Innovation, Sports, Arts, etc.
   achievementTitle   String
-  description        String            @db.Text
+  description        String            @db.Text // achievementDescription
   place              String
   supportingDetails  String?           @db.Text
   status             ApplicationStatus @default(PENDING)
-  internalNotes      String?           @db.Text
+  internalNotes      String?           @db.Text // reviewNotes
   rejectionReason    String?           @db.Text
   requestedInfo      String?           @db.Text
   createdAt          DateTime          @default(now())
@@ -86,10 +86,13 @@ model Certificate {
   achievementTitle  String
   place             String
   issueDate         DateTime    @default(now())
-  pdfUrl            String
+  pdfUrl            String      @default("")
+  certificatePdfUrl String      @default("")
+  verificationStatus String     @default("VALID") // VALID, REVOKED, PENDING
   qrCodeUrl         String?     @db.Text
   verificationUrl   String?
   generatedAt       DateTime    @default(now())
+  createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
   @@map("certificates")
@@ -101,10 +104,11 @@ model AuditLog {
   user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   applicationId String?
   application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  action        String       // e.g. "APPLICATION_SUBMITTED", "APPLICATION_APPROVED", "CERTIFICATE_GENERATED", "ADMIN_LOGIN"
+  action        String       // e.g. "APPLICATION_SUBMITTED", "APPLICATION_APPROVED", "APPLICATION_REJECTED", "CERTIFICATE_GENERATED", "ADMIN_LOGIN"
   details       String?      @db.Text
   ipAddress     String?
   timestamp     DateTime     @default(now())
+  createdAt     DateTime     @default(now())
 
   @@map("audit_logs")
 }

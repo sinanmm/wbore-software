@@ -10,9 +10,22 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("Seeding WBRE Certificate Management System database...");
 
-  // 1. Create Default Admin User
+  // 1. Create Default Users for all Roles
   const passwordHash = await bcrypt.hash("admin123", 12);
-  const adminUser = await prisma.user.upsert({
+  
+  // Super Admin
+  const superAdminUser = await prisma.user.upsert({
+    where: { email: "superadmin@wbre.org" },
+    update: { passwordHash },
+    create: {
+      name: "Dr. Isabella Martinez",
+      email: "superadmin@wbre.org",
+      passwordHash,
+      role: "SUPER_ADMIN",
+    },
+  });
+
+  await prisma.user.upsert({
     where: { email: "admin@wbore.org" },
     update: { passwordHash },
     create: {
@@ -22,7 +35,32 @@ async function main() {
       role: "SUPER_ADMIN",
     },
   });
-  console.log("Created/Updated admin user:", adminUser.email);
+
+  // Admin Adjudicator
+  const adminUser = await prisma.user.upsert({
+    where: { email: "admin@wbre.org" },
+    update: { passwordHash },
+    create: {
+      name: "Arthur Vance",
+      email: "admin@wbre.org",
+      passwordHash,
+      role: "ADMIN",
+    },
+  });
+
+  // Verification Officer
+  const verifyOfficer = await prisma.user.upsert({
+    where: { email: "verify@wbre.org" },
+    update: { passwordHash },
+    create: {
+      name: "Richard Coleman",
+      email: "verify@wbre.org",
+      passwordHash,
+      role: "VERIFICATION_OFFICER",
+    },
+  });
+
+  console.log("Created/Updated seed users: SUPER_ADMIN, ADMIN, VERIFICATION_OFFICER");
 
   // 2. Create Sample Approved Record with Issued Certificate
   const app1 = await prisma.application.upsert({
@@ -42,7 +80,7 @@ async function main() {
       place: "Dubai, United Arab Emirates",
       supportingDetails:
         "Official telemetry logs validated by UAE Civil Aviation and international GPS surveyor beacons.",
-      status: "CERTIFICATE_GENERATED",
+      status: "APPROVED",
       internalNotes: "All telemetry logs and autonomous battery metrics validated by Chief Adjudicator.",
     },
   });
@@ -67,6 +105,8 @@ async function main() {
     where: { applicationId: app1.id },
     update: {
       pdfUrl: certGen.pdfUrl,
+      certificatePdfUrl: certGen.pdfUrl,
+      verificationStatus: "VALID",
       qrCodeUrl: certGen.qrCodeDataUrl,
     },
     create: {
@@ -79,6 +119,8 @@ async function main() {
       place: app1.place,
       issueDate: new Date(),
       pdfUrl: certGen.pdfUrl,
+      certificatePdfUrl: certGen.pdfUrl,
+      verificationStatus: "VALID",
       qrCodeUrl: certGen.qrCodeDataUrl,
       verificationUrl: `http://localhost:3000/verify?recordId=${recordId}`,
     },

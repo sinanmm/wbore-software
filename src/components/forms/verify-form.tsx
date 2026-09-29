@@ -102,20 +102,19 @@ export function VerifyForm() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase">
-                        VERIFIED & AUTHENTIC
+                      <span className="text-base font-bold text-emerald-300 tracking-wide uppercase font-serif">
+                        Certificate Found
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 text-xs font-mono">
-                        Active in Registry
+                        Officially Recognized
                       </span>
                     </div>
                     <h2 className="text-xl sm:text-2xl font-bold text-white font-serif mt-1">
                       {result.certificate.achievementTitle}
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Awarded to{" "}
-                      <strong className="text-slate-200">{result.certificate.recipientName}</strong>{" "}
-                      under {result.certificate.category}.
+                      Recipient: <strong className="text-amber-400">{result.certificate.recipientName}</strong>{" "}
+                      • Category: <span className="text-slate-200">{result.certificate.category}</span>
                     </p>
                   </div>
                 </div>
@@ -127,9 +126,9 @@ export function VerifyForm() {
                     )}/download`}
                     download
                   >
-                    <Button variant="gold" size="md">
+                    <Button variant="gold" size="md" className="font-bold shadow-gold">
                       <Download className="h-4 w-4 mr-1.5" />
-                      Download Certificate PDF
+                      Download Certificate
                     </Button>
                   </a>
                 </div>
@@ -139,25 +138,25 @@ export function VerifyForm() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                   <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
-                    Record ID
+                    Recipient Name
                   </p>
-                  <p className="text-sm font-mono font-bold text-amber-400 mt-1">
-                    {result.certificate.recordId}
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
-                    Certificate No.
-                  </p>
-                  <p className="text-sm font-mono font-bold text-slate-200 mt-1">
-                    {result.certificate.certificateNumber}
+                  <p className="text-sm font-bold text-white mt-1">
+                    {result.certificate.recipientName}
                   </p>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                   <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
-                    Location
+                    Category
+                  </p>
+                  <p className="text-sm font-semibold text-amber-400 mt-1">
+                    {result.certificate.category}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                    Place
                   </p>
                   <p className="text-sm font-semibold text-slate-200 mt-1">
                     {result.certificate.place}
@@ -170,6 +169,33 @@ export function VerifyForm() {
                   </p>
                   <p className="text-sm font-semibold text-slate-200 mt-1">
                     {formatDate(result.certificate.issueDate)}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                    Record ID
+                  </p>
+                  <p className="text-sm font-mono font-bold text-amber-400 mt-1">
+                    {result.certificate.recordId}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                    Certificate Number
+                  </p>
+                  <p className="text-sm font-mono font-bold text-slate-200 mt-1">
+                    {result.certificate.certificateNumber}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 sm:col-span-2">
+                  <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                    Achievement
+                  </p>
+                  <p className="text-sm font-medium text-slate-200 mt-1">
+                    {result.certificate.achievementTitle}
                   </p>
                 </div>
               </div>
@@ -204,8 +230,10 @@ export function VerifyForm() {
               <div className="h-14 w-14 mx-auto rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
                 <ShieldAlert className="h-8 w-8" />
               </div>
-              <h3 className="text-xl font-bold text-white">Record Verification Failed</h3>
-              <p className="text-sm text-slate-300 max-w-md mx-auto">{result.message}</p>
+              <h3 className="text-xl font-bold text-white font-serif">No certificate found</h3>
+              <p className="text-sm text-slate-300 max-w-md mx-auto">
+                {result.message || "No record matches the provided identifier in the official World Book of Record Excellence registry."}
+              </p>
               <div className="pt-2">
                 <Button
                   variant="outline"

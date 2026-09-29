@@ -1,17 +1,30 @@
 import { NextResponse } from "next/server";
 import { VerificationService } from "@/features/verification/verification.service";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const recordId = searchParams.get("recordId") || searchParams.get("id") || "";
-
     const clientIp =
       request.headers.get("x-forwarded-for")?.split(",")[0] ||
       request.headers.get("x-real-ip") ||
-      "unknown";
+      "127.0.0.1";
+
+    const rate = checkRateLimit(clientIp, 30, 60);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        {
+          isValid: false,
+          message: "Rate limit exceeded. Please try again shortly.",
+          resetInSeconds: rate.resetInSeconds,
+        },
+        { status: 429, headers: { "Retry-After": String(rate.resetInSeconds) } }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const recordId = searchParams.get("recordId") || searchParams.get("id") || "";
 
     const result = await VerificationService.verify(recordId, clientIp);
     return NextResponse.json(result);

@@ -1,16 +1,33 @@
 import React from "react";
 import { certificateTemplate } from "@/config/certificate-template";
 import { Settings, Sliders, Database, HardDrive, Cpu, ShieldCheck } from "lucide-react";
+import { getSession } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { Role } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-export default function AdminSettingsPage() {
+export default async function AdminSettingsPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect("/admin/login");
+  }
+
+  const isSuperAdmin = session.role === Role.SUPER_ADMIN;
+
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
       <div>
-        <h2 className="text-2xl font-bold text-white tracking-tight font-serif">
-          System & Engine Settings
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-white tracking-tight font-serif">
+            System & Engine Settings
+          </h2>
+          {!isSuperAdmin && (
+            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-xs border border-slate-700">
+              Read Only (Requires SUPER_ADMIN for changes)
+            </span>
+          )}
+        </div>
         <p className="text-xs text-slate-400">
           Certificate template coordinates engine, storage driver, and system parameters.
         </p>
