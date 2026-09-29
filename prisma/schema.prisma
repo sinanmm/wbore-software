@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  REVIEWER
+}
+
+enum ApplicationStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CERTIFICATE_GENERATED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(ADMIN)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Application {
+  id                 String            @id @default(cuid())
+  applicationNumber  String            @unique // e.g. APP-2026-000001
+  applicantName      String
+  applicantEmail     String
+  applicantPhone     String
+  country            String
+  address            String
+  category           String            // e.g. Science & Technology, Sports, Arts, etc.
+  achievementTitle   String
+  description        String            @db.Text
+  place              String
+  supportingDetails  String?           @db.Text
+  status             ApplicationStatus @default(PENDING)
+  internalNotes      String?           @db.Text
+  rejectionReason    String?           @db.Text
+  requestedInfo      String?           @db.Text
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  evidenceFiles      EvidenceFile[]
+  certificate        Certificate?
+  auditLogs          AuditLog[]
+
+  @@map("applications")
+}
+
+model EvidenceFile {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fileName      String
+  originalName  String
+  fileUrl       String
+  fileType      String      // MIME type (image/png, application/pdf, video/mp4, etc.)
+  fileSize      Int         // size in bytes
+  createdAt     DateTime    @default(now())
+
+  @@map("evidence_files")
+}
+
+model Certificate {
+  id                String      @id @default(cuid())
+  applicationId     String      @unique
+  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  recordId          String      @unique // e.g. WBRE-TEC-2026-000101
+  certificateNumber String      @unique // e.g. WBRE-CERT-2026-000101
+  recipientName     String
+  category          String
+  achievementTitle  String
+  place             String
+  issueDate         DateTime    @default(now())
+  pdfUrl            String
+  qrCodeUrl         String?     @db.Text
+  verificationUrl   String?
+  generatedAt       DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@map("certificates")
+}
+
+model AuditLog {
+  id            String       @id @default(cuid())
+  userId        String?
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  action        String       // e.g. "APPLICATION_SUBMITTED", "APPLICATION_APPROVED", "CERTIFICATE_GENERATED", "ADMIN_LOGIN"
+  details       String?      @db.Text
+  ipAddress     String?
+  timestamp     DateTime     @default(now())
+
+  @@map("audit_logs")
+}
