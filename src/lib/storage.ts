@@ -2,25 +2,83 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 
+export interface StorageFileMetadata {
+  size: number;
+  lastModified?: Date;
+}
+
+export interface StorageUploadResult {
+  storageKey: string;
+  fileUrl: string;
+  storagePath: string;
+}
+
+export interface StorageUploadOptions {
+  preserveFilename?: boolean;
+}
+
 export interface StorageAdapter {
   uploadFile(
     fileBuffer: Buffer,
-    filename: string,
+    originalFilename: string,
     subfolder: string,
-    mimeType: string
-  ): Promise<{ fileUrl: string; storagePath: string }>;
-  getFile(filePath: string): Promise<Buffer>;
-  deleteFile(filePath: string): Promise<void>;
+    mimeType: string,
+    options?: StorageUploadOptions
+  ): Promise<StorageUploadResult>;
+  getFile(storageKeyOrPath: string): Promise<Buffer>;
+  deleteFile(storageKeyOrPath: string): Promise<void>;
+  exists(storageKeyOrPath: string): Promise<boolean>;
+  getMetadata(storageKeyOrPath: string): Promise<StorageFileMetadata>;
 }
 
-// Local Storage Driver
-class LocalStorageAdapter implements StorageAdapter {
+/**
+ * Local Storage Adapter implementation.
+ * Stores evidence files securely on the local filesystem / mounted volume.
+ * Resolves paths safely with directory-traversal prevention.
+ */
+export class LocalStorageAdapter implements StorageAdapter {
   private baseDir: string;
-  private publicBaseUrl: string;
+  private legacyPublicDir: string;
 
   constructor() {
-    this.baseDir = path.join(process.cwd(), "public", "uploads");
-    this.publicBaseUrl = "/uploads";
+    // If STORAGE_LOCAL_DIR is provided (e.g. Docker volume /app/storage/uploads or /app/public/uploads), use it.
+    // Otherwise fallback to process.cwd()/public/uploads for seamless local development.
+    const customDir = process.env.STORAGE_LOCAL_DIR;
+    this.baseDir = customDir
+      ? path.resolve(customDir)
+      : path.join(process.cwd(), "public", "uploads");
+
+    this.legacyPublicDir = path.join(process.cwd(), "public", "uploads");
+  }
+
+  /**
+   * Resolves a storage key or legacy path into a verified safe physical filesystem path.
+   * Strictly prevents directory traversal attacks (e.g. ../../etc/passwd).
+   */
+  private resolveSafePath(storageKeyOrPath: string): string {
+    // Strip leading slashes and legacy prefixes
+    let cleanKey = storageKeyOrPath
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+
+    if (cleanKey.startsWith("uploads/")) {
+      cleanKey = cleanKey.slice("uploads/".length);
+    }
+
+    // Resolve inside primary baseDir
+    const candidatePath = path.resolve(this.baseDir, cleanKey);
+
+    // Verify it stays inside baseDir
+    if (!candidatePath.startsWith(path.resolve(this.baseDir))) {
+      // Check legacy public directory as fallback
+      const legacyPath = path.resolve(this.legacyPublicDir, cleanKey);
+      if (!legacyPath.startsWith(path.resolve(this.legacyPublicDir))) {
+        throw new Error("Security Error: Invalid path or directory traversal detected.");
+      }
+      return legacyPath;
+    }
+
+    return candidatePath;
   }
 
   async uploadFile(
@@ -28,65 +86,148 @@ class LocalStorageAdapter implements StorageAdapter {
     originalFilename: string,
     subfolder: string,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _mimeType: string
-  ): Promise<{ fileUrl: string; storagePath: string }> {
-    const targetDir = path.join(this.baseDir, subfolder);
+    _mimeType: string,
+    options?: StorageUploadOptions
+  ): Promise<StorageUploadResult> {
+    const cleanSubfolder = subfolder
+      .replace(/\\/g, "/")
+      .split("/")
+      .map((part) => part.replace(/[^a-zA-Z0-9_-]/g, ""))
+      .filter(Boolean)
+      .join("/");
+
+    const targetDir = path.join(this.baseDir, cleanSubfolder);
     await fs.mkdir(targetDir, { recursive: true });
 
     const ext = path.extname(originalFilename).toLowerCase();
     const sanitizedBase = path
       .basename(originalFilename, ext)
       .replace(/[^a-zA-Z0-9_-]/g, "_")
-      .slice(0, 50);
-    const uniqueHash = crypto.randomBytes(6).toString("hex");
-    const uniqueFilename = `${Date.now()}-${sanitizedBase}-${uniqueHash}${ext}`;
+      .slice(0, 80);
 
-    const filePath = path.join(targetDir, uniqueFilename);
+    let finalFilename: string;
+    if (options?.preserveFilename) {
+      finalFilename = `${sanitizedBase}${ext}`;
+    } else {
+      const uniqueHash = crypto.randomBytes(8).toString("hex");
+      finalFilename = `${Date.now()}-${sanitizedBase}-${uniqueHash}${ext}`;
+    }
+
+    const filePath = path.join(targetDir, finalFilename);
     await fs.writeFile(filePath, fileBuffer);
 
-    const fileUrl = `${this.publicBaseUrl}/${subfolder}/${uniqueFilename}`;
+    const storageKey = cleanSubfolder ? `${cleanSubfolder}/${finalFilename}` : finalFilename;
+    // Virtual file URL used in database
+    const fileUrl = `/uploads/${storageKey}`;
+
     return {
+      storageKey,
       fileUrl,
       storagePath: filePath,
     };
   }
 
-  async getFile(relativeOrFullPath: string): Promise<Buffer> {
-    const cleanPath = relativeOrFullPath.startsWith("/uploads/")
-      ? path.join(process.cwd(), "public", relativeOrFullPath)
-      : relativeOrFullPath;
-    return await fs.readFile(cleanPath);
+  async getFile(storageKeyOrPath: string): Promise<Buffer> {
+    const safePath = this.resolveSafePath(storageKeyOrPath);
+
+    try {
+      return await fs.readFile(safePath);
+    } catch {
+      // If not in baseDir, try legacy public directory
+      const cleanKey = storageKeyOrPath
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .replace(/^uploads\//, "");
+      const legacyPath = path.resolve(this.legacyPublicDir, cleanKey);
+      return await fs.readFile(legacyPath);
+    }
   }
 
-  async deleteFile(relativeOrFullPath: string): Promise<void> {
+  async exists(storageKeyOrPath: string): Promise<boolean> {
     try {
-      const cleanPath = relativeOrFullPath.startsWith("/uploads/")
-        ? path.join(process.cwd(), "public", relativeOrFullPath)
-        : relativeOrFullPath;
-      await fs.unlink(cleanPath);
+      const safePath = this.resolveSafePath(storageKeyOrPath);
+      await fs.access(safePath);
+      return true;
     } catch {
-      // Ignored if file doesn't exist
+      try {
+        const cleanKey = storageKeyOrPath
+          .replace(/\\/g, "/")
+          .replace(/^\/+/, "")
+          .replace(/^uploads\//, "");
+        const legacyPath = path.resolve(this.legacyPublicDir, cleanKey);
+        await fs.access(legacyPath);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  async getMetadata(storageKeyOrPath: string): Promise<StorageFileMetadata> {
+    const safePath = this.resolveSafePath(storageKeyOrPath);
+    try {
+      const stats = await fs.stat(safePath);
+      return {
+        size: stats.size,
+        lastModified: stats.mtime,
+      };
+    } catch {
+      const cleanKey = storageKeyOrPath
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .replace(/^uploads\//, "");
+      const legacyPath = path.resolve(this.legacyPublicDir, cleanKey);
+      const stats = await fs.stat(legacyPath);
+      return {
+        size: stats.size,
+        lastModified: stats.mtime,
+      };
+    }
+  }
+
+  async deleteFile(storageKeyOrPath: string): Promise<void> {
+    try {
+      const safePath = this.resolveSafePath(storageKeyOrPath);
+      await fs.unlink(safePath);
+    } catch {
+      try {
+        const cleanKey = storageKeyOrPath
+          .replace(/\\/g, "/")
+          .replace(/^\/+/, "")
+          .replace(/^uploads\//, "");
+        const legacyPath = path.resolve(this.legacyPublicDir, cleanKey);
+        await fs.unlink(legacyPath);
+      } catch {
+        // Ignored if file does not exist
+      }
     }
   }
 }
 
-// Future Cloud Storage Driver (S3 / R2 / Wasabi compatible placeholder)
+// Future S3/R2 Cloud Storage Adapter placeholder
 class S3CompatibleStorageAdapter implements StorageAdapter {
-  // Configured via AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET, S3_ENDPOINT
-  async uploadFile(): Promise<{ fileUrl: string; storagePath: string }> {
-    throw new Error("S3 Cloud storage configured for future migration. Set STORAGE_DRIVER=LOCAL for current storage.");
+  async uploadFile(): Promise<StorageUploadResult> {
+    throw new Error(
+      "S3/R2 storage adapter is configured for future cloud migration. Set STORAGE_DRIVER=LOCAL for current environment."
+    );
   }
   async getFile(): Promise<Buffer> {
-    throw new Error("S3 Cloud storage not yet initialized.");
+    throw new Error("S3/R2 storage adapter not initialized.");
   }
   async deleteFile(): Promise<void> {
-    throw new Error("S3 Cloud storage not yet initialized.");
+    throw new Error("S3/R2 storage adapter not initialized.");
+  }
+  async exists(): Promise<boolean> {
+    return false;
+  }
+  async getMetadata(): Promise<StorageFileMetadata> {
+    throw new Error("S3/R2 storage adapter not initialized.");
   }
 }
 
 export function getStorage(): StorageAdapter {
   const driver = process.env.STORAGE_DRIVER || "LOCAL";
-  if (driver === "S3" || driver === "R2") {
+  if (driver === "S3" || driver === "R2" || driver === "WASABI") {
     return new S3CompatibleStorageAdapter();
   }
   return new LocalStorageAdapter();
@@ -94,16 +235,10 @@ export function getStorage(): StorageAdapter {
 
 export const storage = getStorage();
 
-export const ALLOWED_EVIDENCE_MIME_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "application/pdf",
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
-
-export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+export {
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_COUNT,
+  MAX_TOTAL_EVIDENCE_SIZE_BYTES,
+  MAX_DOSSIER_SIZE_BYTES,
+  ALLOWED_EVIDENCE_TYPES,
+} from "./file-security";

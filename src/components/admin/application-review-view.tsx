@@ -14,7 +14,10 @@ import {
   Download,
   Eye,
   ShieldCheck,
+  ShieldAlert,
   AlertTriangle,
+  Clock,
+  ExternalLink,
 } from "lucide-react";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { EvidenceViewer } from "@/components/admin/evidence-viewer";
@@ -24,7 +27,13 @@ import { Modal } from "@/components/ui/modal";
 import { CertificatePreview } from "@/components/certificate/certificate-preview";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
-export function ApplicationReviewView({ initialApplication }: { initialApplication: any }) {
+export function ApplicationReviewView({
+  initialApplication,
+  currentUserRole,
+}: {
+  initialApplication: any;
+  currentUserRole?: string;
+}) {
   const router = useRouter();
   const [application, setApplication] = useState(initialApplication);
   const [internalNotes, setInternalNotes] = useState(application.internalNotes || "");
@@ -36,6 +45,8 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [isRequestInfoModalOpen, setIsRequestInfoModalOpen] = useState(false);
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
+  const [isGenerateCertModalOpen, setIsGenerateCertModalOpen] = useState(false);
+  const [isGeneratingCert, setIsGeneratingCert] = useState(false);
 
   const [rejectionReason, setRejectionReason] = useState("");
   const [requestedInfo, setRequestedInfo] = useState("");
@@ -58,14 +69,43 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
     }
   };
 
+  const handleGenerateCertificate = async () => {
+    setIsGeneratingCert(true);
+    try {
+      const res = await fetch("/api/certificates/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: application.id }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to generate certificate");
+      }
+
+      setApplication((prev: any) => ({
+        ...prev,
+        status: "CERTIFICATE_GENERATED",
+        certificate: data.certificate,
+      }));
+      setIsGenerateCertModalOpen(false);
+      setIsCertModalOpen(true);
+      router.refresh();
+    } catch (err: any) {
+      alert(err.message || "An error occurred while generating the certificate.");
+    } finally {
+      setIsGeneratingCert(false);
+    }
+  };
+
   const handleStatusChange = async (
     status: string,
     extra: { rejectionReason?: string; requestedInfo?: string } = {}
   ) => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/applications/${application.id}/status`, {
-        method: "POST",
+      const res = await fetch(`/api/applications/${application.id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status,
@@ -84,7 +124,7 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
       setIsRejectModalOpen(false);
       setIsRequestInfoModalOpen(false);
 
-      if (status === "APPROVED" || status === "CERTIFICATE_GENERATED") {
+      if (status === "CERTIFICATE_GENERATED" && data.application?.certificate) {
         setIsCertModalOpen(true);
       }
 
@@ -117,6 +157,68 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
             <p className="text-xs text-slate-400 mt-0.5">
               Lodged on {formatDateTime(application.createdAt)}
             </p>
+          </div>
+        </div>
+
+        {/* Adjudication Progress Pipeline */}
+        <div className="flex items-center gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-2">
+          <div className="flex items-center gap-1.5 font-medium">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                application.status === "PENDING"
+                  ? "bg-amber-400 animate-pulse"
+                  : "bg-emerald-500"
+              }`}
+            />
+            <span className={application.status === "PENDING" ? "text-amber-300 font-bold" : "text-slate-400"}>
+              1. Lodged
+            </span>
+          </div>
+          <span className="text-slate-600">→</span>
+          <div className="flex items-center gap-1.5 font-medium">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                application.status === "UNDER_REVIEW"
+                  ? "bg-blue-400 animate-pulse"
+                  : application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  ? "bg-emerald-500"
+                  : "bg-slate-700"
+              }`}
+            />
+            <span
+              className={
+                application.status === "UNDER_REVIEW"
+                  ? "text-blue-300 font-bold"
+                  : application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  ? "text-emerald-400"
+                  : "text-slate-500"
+              }
+            >
+              2. Under Review
+            </span>
+          </div>
+          <span className="text-slate-600">→</span>
+          <div className="flex items-center gap-1.5 font-medium">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                  : application.status === "REJECTED"
+                  ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]"
+                  : "bg-slate-700"
+              }`}
+            />
+            <span
+              className={
+                application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  ? "text-emerald-300 font-bold"
+                  : application.status === "REJECTED"
+                  ? "text-rose-400 font-bold"
+                  : "text-slate-500"
+              }
+            >
+              3. {application.status === "REJECTED" ? "Rejected" : "Approved"}
+            </span>
           </div>
         </div>
 
@@ -254,7 +356,22 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
               </h3>
             </div>
 
-            <EvidenceViewer files={application.evidenceFiles || []} />
+            <EvidenceViewer
+              files={application.evidenceFiles || []}
+              applicationId={application.id}
+              currentUserRole={currentUserRole}
+              onEvidenceChange={async () => {
+                try {
+                  const res = await fetch(`/api/applications/${application.id}`);
+                  if (res.ok) {
+                    const refreshed = await res.json();
+                    setApplication(refreshed);
+                  }
+                } catch {
+                  router.refresh();
+                }
+              }}
+            />
           </div>
         </div>
 
@@ -270,43 +387,185 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
             </div>
 
             <div className="space-y-3">
-              {/* Approve Certificate Button */}
-              <Button
-                variant="gold"
-                size="md"
-                onClick={() => setIsApproveModalOpen(true)}
-                disabled={actionLoading || application.status === "CERTIFICATE_GENERATED"}
-                className="w-full font-bold shadow-gold justify-start"
-              >
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                {application.status === "CERTIFICATE_GENERATED"
-                  ? "Certificate Issued"
-                  : "Approve Certificate"}
-              </Button>
+              {/* If PENDING: Show Start Review Button */}
+              {application.status === "PENDING" && (
+                <Button
+                  variant="gold"
+                  size="md"
+                  onClick={() => handleStatusChange("UNDER_REVIEW")}
+                  isLoading={actionLoading}
+                  className="w-full font-bold shadow-gold justify-start"
+                >
+                  <Clock className="h-4 w-4 mr-2" />
+                  Start Review
+                </Button>
+              )}
 
-              {/* Request More Information Button */}
-              <Button
-                variant="outline"
-                size="md"
-                onClick={() => setIsRequestInfoModalOpen(true)}
-                disabled={actionLoading}
-                className="w-full justify-start text-amber-300 hover:text-amber-200"
-              >
-                <HelpCircle className="h-4 w-4 mr-2" />
-                Request More Information
-              </Button>
+              {/* If UNDER_REVIEW: Show Adjudication Options based on Role */}
+              {application.status === "UNDER_REVIEW" && (
+                <>
+                  {currentUserRole === "VERIFICATION_OFFICER" ? (
+                    <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                      <p className="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
+                        Adjudication Restricted
+                      </p>
+                      <p>
+                        Verification Officers can review evidence and record internal notes. Final approval and rejection require Administrator privileges.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Approve Button */}
+                      <Button
+                        variant="gold"
+                        size="md"
+                        onClick={() => setIsApproveModalOpen(true)}
+                        disabled={actionLoading}
+                        className="w-full font-bold shadow-gold justify-start"
+                      >
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Approve Application
+                      </Button>
 
-              {/* Reject Application Button */}
-              <Button
-                variant="destructive"
-                size="md"
-                onClick={() => setIsRejectModalOpen(true)}
-                disabled={actionLoading || application.status === "REJECTED"}
-                className="w-full justify-start"
-              >
-                <XCircle className="h-4 w-4 mr-2" />
-                Reject Application
-              </Button>
+                      {/* Request More Information Button */}
+                      <Button
+                        variant="outline"
+                        size="md"
+                        onClick={() => setIsRequestInfoModalOpen(true)}
+                        disabled={actionLoading}
+                        className="w-full justify-start text-amber-300 hover:text-amber-200"
+                      >
+                        <HelpCircle className="h-4 w-4 mr-2" />
+                        Request More Information
+                      </Button>
+
+                      {/* Reject Application Button */}
+                      <Button
+                        variant="destructive"
+                        size="md"
+                        onClick={() => setIsRejectModalOpen(true)}
+                        disabled={actionLoading}
+                        className="w-full justify-start"
+                      >
+                        <XCircle className="h-4 w-4 mr-2" />
+                        Reject Application
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* If APPROVED: Display Status Notice & Action to Generate Certificate */}
+              {application.status === "APPROVED" && (
+                <div className="space-y-3">
+                  <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-300 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5 text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Application Approved
+                    </p>
+                    <p className="text-[11px] text-slate-300">
+                      This application has been formally approved. Official certificate can now be generated.
+                    </p>
+                  </div>
+
+                  {currentUserRole !== "VERIFICATION_OFFICER" ? (
+                    <Button
+                      variant="gold"
+                      size="md"
+                      onClick={() => setIsGenerateCertModalOpen(true)}
+                      disabled={isGeneratingCert}
+                      className="w-full font-bold shadow-gold justify-start"
+                    >
+                      <Award className="h-4 w-4 mr-2" />
+                      GENERATE CERTIFICATE
+                    </Button>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                      <p className="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
+                        Privilege Notice
+                      </p>
+                      <p>
+                        Generating official WBRE certificates requires Administrator or Super Administrator privileges.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* If REJECTED: Display Status Notice */}
+              {application.status === "REJECTED" && (
+                <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/40 text-xs text-rose-300 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-rose-400">
+                    <XCircle className="h-4 w-4" />
+                    Application Rejected
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    <strong>Reason:</strong> {application.rejectionReason || "No formal reason recorded."}
+                  </p>
+                </div>
+              )}
+
+              {/* If CERTIFICATE_GENERATED: Display Certificate Summary & Actions */}
+              {application.status === "CERTIFICATE_GENERATED" && application.certificate && (
+                <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Award className="h-4 w-4" />
+                      Certificate Generated
+                    </p>
+                    <div className="pt-1 font-mono text-xs space-y-0.5">
+                      <p className="text-slate-300">
+                        Record ID: <strong className="text-amber-400">{application.certificate.recordId}</strong>
+                      </p>
+                      <p className="text-slate-300">
+                        Certificate Number: <strong className="text-slate-100">{application.certificate.certificateNumber}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsCertModalOpen(true)}
+                      className="w-full justify-start text-xs"
+                    >
+                      <Eye className="h-3.5 w-3.5 mr-2" />
+                      View Certificate
+                    </Button>
+                    <a
+                      href={`/api/verification/${encodeURIComponent(application.certificate.recordId)}/certificate`}
+                      download
+                      className="w-full"
+                    >
+                      <Button
+                        variant="gold"
+                        size="sm"
+                        className="w-full justify-start text-xs font-semibold"
+                      >
+                        <Download className="h-3.5 w-3.5 mr-2" />
+                        Download Certificate
+                      </Button>
+                    </a>
+                    <Link
+                      href={`/verify/${encodeURIComponent(application.certificate.recordId)}`}
+                      target="_blank"
+                      className="w-full"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-xs text-amber-300 hover:text-amber-200"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                        Open Verification
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -345,30 +604,26 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
       <Modal
         isOpen={isApproveModalOpen}
         onClose={() => setIsApproveModalOpen(false)}
-        title="Approve Record & Generate Certificate"
+        title="Approve Record Application"
         maxWidth="md"
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-300">
-            Approving this application will execute the automated certificate issuance engine:
+            Are you sure you want to approve this application?
           </p>
 
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
             <p className="flex items-center gap-2 text-slate-200 font-semibold">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              1. Generate unique Record ID (e.g. WBRE-TEC-2026-000101)
+              Application status will transition to APPROVED
             </p>
             <p className="flex items-center gap-2 text-slate-200 font-semibold">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              2. Generate Certificate Number (e.g. WBRE-CERT-2026-000101)
+              Administrative audit record (APPLICATION_APPROVED) will be recorded
             </p>
             <p className="flex items-center gap-2 text-slate-200 font-semibold">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              3. Produce high-resolution A4 portrait Certificate PDF with vector overlay
-            </p>
-            <p className="flex items-center gap-2 text-slate-200 font-semibold">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              4. Register certificate in public verification registry
+              Application will be queued for Certificate generation in the next phase
             </p>
           </div>
 
@@ -386,7 +641,7 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
               isLoading={actionLoading}
               onClick={() => handleStatusChange("APPROVED")}
             >
-              Confirm & Generate
+              Confirm Approval
             </Button>
           </div>
         </div>
@@ -507,6 +762,54 @@ export function ApplicationReviewView({ initialApplication }: { initialApplicati
           </div>
         </Modal>
       )}
+
+      {/* GENERATE CERTIFICATE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={isGenerateCertModalOpen}
+        onClose={() => !isGeneratingCert && setIsGenerateCertModalOpen(false)}
+        title="Generate official WBRE certificate?"
+        maxWidth="md"
+      >
+        <div className="space-y-4 text-xs">
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">Applicant:</span>
+              <p className="text-sm font-bold text-white mt-0.5">{application.applicantName}</p>
+            </div>
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">Achievement:</span>
+              <p className="text-xs font-medium text-amber-300 mt-0.5">{application.achievementTitle}</p>
+            </div>
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400">Category:</span>
+              <p className="text-xs text-slate-200 mt-0.5">{application.category}</p>
+            </div>
+          </div>
+
+          <p className="text-slate-300">
+            The certificate will receive a permanent Record ID.
+          </p>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isGeneratingCert}
+              onClick={() => setIsGenerateCertModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gold"
+              size="sm"
+              isLoading={isGeneratingCert}
+              onClick={handleGenerateCertificate}
+            >
+              Generate Certificate
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

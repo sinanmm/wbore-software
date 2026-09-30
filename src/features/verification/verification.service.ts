@@ -3,8 +3,8 @@ import { recordAuditLog } from "@/lib/audit";
 
 export interface VerificationResult {
   isValid: boolean;
+  status: "VALID" | "REVOKED" | "NOT_FOUND";
   certificate?: {
-    id: string;
     recordId: string;
     certificateNumber: string;
     recipientName: string;
@@ -12,15 +12,9 @@ export interface VerificationResult {
     achievementTitle: string;
     place: string;
     issueDate: Date;
-    pdfUrl: string;
-    qrCodeUrl: string | null;
-    verificationUrl: string | null;
-  };
-  application?: {
-    applicationNumber: string;
-    country: string;
-    description: string;
-    createdAt: Date;
+    verificationStatus: string;
+    downloadUrl: string;
+    verificationUrl?: string | null;
   };
   verifiedAt: Date;
   message: string;
@@ -29,6 +23,8 @@ export interface VerificationResult {
 export class VerificationService {
   /**
    * Verifies a certificate by Record ID or Certificate Number.
+   * Strictly enforces data privacy: never exposes database IDs, storage keys,
+   * applicant email, phone, address, evidence, or internal notes.
    */
   public static async verify(
     identifier: string,
@@ -37,8 +33,9 @@ export class VerificationService {
     if (!identifier || identifier.trim().length === 0) {
       return {
         isValid: false,
+        status: "NOT_FOUND",
         verifiedAt: new Date(),
-        message: "Please enter a valid Record ID or Certificate Number.",
+        message: "CERTIFICATE NOT FOUND. Please provide a valid Record ID.",
       };
     }
 
@@ -48,8 +45,38 @@ export class VerificationService {
       if (!cert) {
         return {
           isValid: false,
+          status: "NOT_FOUND",
           verifiedAt: new Date(),
-          message: `No active record found for "${identifier.trim()}". Please verify the ID format and try again.`,
+          message: "CERTIFICATE NOT FOUND",
+        };
+      }
+
+      // Check if certificate has been revoked
+      if (cert.verificationStatus === "REVOKED") {
+        await recordAuditLog({
+          applicationId: cert.applicationId,
+          action: "CERTIFICATE_REVOCATION_CHECKED",
+          details: `Revoked certificate queried: ${cert.recordId}`,
+          ipAddress: ipAddress || null,
+        });
+
+        return {
+          isValid: false,
+          status: "REVOKED",
+          certificate: {
+            recordId: cert.recordId,
+            certificateNumber: cert.certificateNumber,
+            recipientName: cert.recipientName,
+            category: cert.category,
+            achievementTitle: cert.achievementTitle,
+            place: cert.place,
+            issueDate: cert.issueDate,
+            verificationStatus: "REVOKED",
+            downloadUrl: `/api/verification/${encodeURIComponent(cert.recordId)}/certificate`,
+            verificationUrl: cert.verificationUrl,
+          },
+          verifiedAt: new Date(),
+          message: "CERTIFICATE REVOKED",
         };
       }
 
@@ -62,8 +89,8 @@ export class VerificationService {
 
       return {
         isValid: true,
+        status: "VALID",
         certificate: {
-          id: cert.id,
           recordId: cert.recordId,
           certificateNumber: cert.certificateNumber,
           recipientName: cert.recipientName,
@@ -71,27 +98,20 @@ export class VerificationService {
           achievementTitle: cert.achievementTitle,
           place: cert.place,
           issueDate: cert.issueDate,
-          pdfUrl: cert.pdfUrl,
-          qrCodeUrl: cert.qrCodeUrl,
+          verificationStatus: cert.verificationStatus,
+          downloadUrl: `/api/verification/${encodeURIComponent(cert.recordId)}/certificate`,
           verificationUrl: cert.verificationUrl,
         },
-        application: cert.application
-          ? {
-              applicationNumber: cert.application.applicationNumber,
-              country: cert.application.country,
-              description: cert.application.description,
-              createdAt: cert.application.createdAt,
-            }
-          : undefined,
         verifiedAt: new Date(),
-        message: "Certificate is authentic, officially recognized, and active in the registry.",
+        message: "VERIFIED",
       };
     } catch (dbErr: any) {
-      console.warn("Database connection issue during verification:", dbErr.message);
+      console.warn("Verification registry error:", dbErr.message);
       return {
         isValid: false,
+        status: "NOT_FOUND",
         verifiedAt: new Date(),
-        message: "Database connection unavailable. Please verify DATABASE_URL is configured.",
+        message: "CERTIFICATE NOT FOUND",
       };
     }
   }

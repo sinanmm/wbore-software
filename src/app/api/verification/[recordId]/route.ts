@@ -35,18 +35,30 @@ export async function GET(
 
     const result = await VerificationService.verify(decodedId, clientIp);
 
-    if (!result.isValid) {
+    if (result.status === "NOT_FOUND") {
       return NextResponse.json(
         {
           isValid: false,
-          message: "No certificate found",
-          details: result.message,
+          status: "NOT_FOUND",
+          message: "CERTIFICATE NOT FOUND",
         },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(result);
+    if (result.status === "REVOKED") {
+      return NextResponse.json(
+        {
+          isValid: false,
+          status: "REVOKED",
+          message: "CERTIFICATE REVOKED",
+          certificate: result.certificate,
+        },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json(result, { status: 200 });
   } catch (error: any) {
     console.error("Verification API error:", error);
     return NextResponse.json(

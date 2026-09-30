@@ -12,7 +12,7 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-wbore}?schema=public
-      - JWT_SECRET=${JWT_SECRET:-wbre-super-secure-jwt-secret-key-32-chars-min-prod}
+      - JWT_SECRET=${JWT_SECRET}
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       - STORAGE_DRIVER=LOCAL
       - STORAGE_LOCAL_DIR=/app/public/uploads

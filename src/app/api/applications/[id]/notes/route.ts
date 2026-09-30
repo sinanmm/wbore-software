@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApplicationService } from "@/features/applications/application.service";
 import { getSession } from "@/lib/auth";
+import { saveNotesSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +17,20 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await request.json();
-    const notes = typeof body.notes === "string" ? body.notes : "";
+    const parsed = saveNotesSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid notes payload", details: parsed.error.format() },
+        { status: 400 }
+      );
+    }
 
     const updated = await ApplicationService.saveInternalNotes(
       id,
-      notes,
-      session.userId
+      parsed.data.notes,
+      session.userId,
+      session.role
     );
 
     return NextResponse.json({

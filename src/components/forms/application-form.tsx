@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { EvidenceUploader, EvidenceFileItem } from "./evidence-uploader";
+import { MAX_FILE_COUNT } from "@/config/evidence-limits";
 
 const CATEGORIES = [
   "Technology & Innovation",
@@ -427,7 +428,7 @@ export function ApplicationForm() {
             <EvidenceUploader
               files={evidenceFiles}
               onChange={setEvidenceFiles}
-              maxFiles={12}
+              maxFiles={MAX_FILE_COUNT}
             />
 
             {/* Quick Review Summary */}

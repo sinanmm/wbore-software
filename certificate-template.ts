@@ -46,18 +46,18 @@ export const certificateTemplate: CertificateTemplateConfig = {
   recipientName: {
     x: 527.5,
     y: 742,
-    fontSize: 40,
+    fontSize: 38,
     fontFamily: "Cinzel, Times, serif",
     color: "#0F1E3D",
     align: "center",
     maxWidth: 720,
   },
 
-  // Aligned to the right of the pre-printed labels on template
+  // Aligned precisely to the right of the pre-printed labels on template
   category: {
-    x: 440,
-    y: 918,
-    fontSize: 15,
+    x: 445,
+    y: 894,
+    fontSize: 14,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -66,9 +66,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   achievementTitle: {
-    x: 440,
-    y: 964,
-    fontSize: 15,
+    x: 445,
+    y: 942,
+    fontSize: 13,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -77,9 +77,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   place: {
-    x: 440,
-    y: 1010,
-    fontSize: 15,
+    x: 445,
+    y: 978,
+    fontSize: 14,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -88,9 +88,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   recordId: {
-    x: 440,
-    y: 1056,
-    fontSize: 15,
+    x: 445,
+    y: 1007,
+    fontSize: 14,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -99,9 +99,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   certificateNumber: {
-    x: 440,
-    y: 1102,
-    fontSize: 15,
+    x: 445,
+    y: 1037,
+    fontSize: 14,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -110,9 +110,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   dateOfRecognition: {
-    x: 440,
-    y: 1148,
-    fontSize: 15,
+    x: 445,
+    y: 1067,
+    fontSize: 14,
     fontFamily: "Helvetica, Arial, sans-serif",
     color: "#1E293B",
     align: "left",
@@ -121,9 +121,9 @@ export const certificateTemplate: CertificateTemplateConfig = {
   },
 
   qrCode: {
-    x: 825,
-    y: 1300,
-    size: 85,
+    x: 835,
+    y: 1335,
+    size: 70,
   },
 };
 

@@ -94,14 +94,12 @@ export function CertificatePreview({
           className="object-cover pointer-events-none"
         />
 
-        {/* Dynamic Overlay Layer - Accurately positioned using % coordinates derived from 1055 x 1491 */}
+        {/* Dynamic Overlay Layer - Accurately positioned using exact template baselines (1055 x 1491) */}
         {/* Recipient Name: y = 742 / 1491 = 49.76% */}
         <div
           className="absolute left-0 right-0 text-center px-8 z-10"
-          style={{ top: "48.2%", height: "4.2%" }}
+          style={{ top: "47.8%", height: "4.2%" }}
         >
-          {/* Subtle parchment tint backdrop to erase background placeholder cleanly */}
-          <div className="absolute inset-0 mx-auto max-w-[68%] bg-[#FCF9F2]/95 -z-10 rounded-md shadow-sm" />
           <h2
             className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-extrabold text-[#0D1B3E] tracking-wider uppercase font-serif drop-shadow-sm flex items-center justify-center h-full"
             style={{ fontFamily: "'Cinzel', Georgia, serif" }}
@@ -110,60 +108,60 @@ export function CertificatePreview({
           </h2>
         </div>
 
-        {/* Values Column aligned to the right of template labels (x = 440 / 1055 = 41.7%) */}
-        {/* Category: y = 918 / 1491 = 61.57% */}
+        {/* Values Column aligned precisely to the right of template labels (x = 445 / 1055 = 42.18%) */}
+        {/* Category: y = 894 / 1491 = 59.96% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base truncate max-w-[42%] z-10"
-          style={{ top: "61.3%", left: "41.8%" }}
+          style={{ top: "59.3%", left: "42.2%" }}
         >
           : &nbsp; {data.category.toUpperCase()}
         </div>
 
-        {/* Achievement Title: y = 964 / 1491 = 64.65% */}
+        {/* Achievement Title: y = 942 / 1491 = 63.18% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base truncate max-w-[42%] z-10"
-          style={{ top: "64.4%", left: "41.8%" }}
+          style={{ top: "62.4%", left: "42.2%" }}
         >
           : &nbsp; {data.achievementTitle.toUpperCase()}
         </div>
 
-        {/* Place: y = 1010 / 1491 = 67.74% */}
+        {/* Place: y = 978 / 1491 = 65.59% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base truncate max-w-[42%] z-10"
-          style={{ top: "67.5%", left: "41.8%" }}
+          style={{ top: "64.9%", left: "42.2%" }}
         >
           : &nbsp; {data.place.toUpperCase()}
         </div>
 
-        {/* Record ID: y = 1056 / 1491 = 70.82% */}
+        {/* Record ID: y = 1007 / 1491 = 67.54% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base font-mono z-10"
-          style={{ top: "70.6%", left: "41.8%" }}
+          style={{ top: "66.8%", left: "42.2%" }}
         >
           : &nbsp; {data.recordId}
         </div>
 
-        {/* Certificate Number: y = 1102 / 1491 = 73.91% */}
+        {/* Certificate Number: y = 1037 / 1491 = 69.55% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base font-mono z-10"
-          style={{ top: "73.7%", left: "41.8%" }}
+          style={{ top: "68.8%", left: "42.2%" }}
         >
           : &nbsp; {data.certificateNumber}
         </div>
 
-        {/* Date of Recognition: y = 1148 / 1491 = 77.00% */}
+        {/* Date of Recognition: y = 1067 / 1491 = 71.56% */}
         <div
           className="absolute font-sans font-bold text-[#1A2538] text-[9px] sm:text-xs md:text-sm lg:text-base z-10"
-          style={{ top: "76.8%", left: "41.8%" }}
+          style={{ top: "70.9%", left: "42.2%" }}
         >
           : &nbsp; {data.dateOfRecognition.toUpperCase()}
         </div>
 
-        {/* QR Code in Seal Area (x = 825 / 1055 = 78.2%, y = 1300 / 1491 = 87.2%) */}
+        {/* QR Code in designated quiet area (x = 835 / 1055 = 79.1%, y = 1335 / 1491 = 89.5%) */}
         {data.qrCodeUrl && (
           <div
-            className="absolute z-10 flex flex-col items-center bg-white/90 p-1.5 rounded-lg border border-amber-300 shadow-md backdrop-blur-xs"
-            style={{ bottom: "5.5%", right: "8.5%", width: "12%", height: "10%" }}
+            className="absolute z-10 flex flex-col items-center bg-white/95 p-1 rounded-md border border-amber-300 shadow-md backdrop-blur-xs"
+            style={{ top: "89.5%", left: "79.1%", width: "7.8%", aspectRatio: "1" }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -171,7 +169,7 @@ export function CertificatePreview({
               alt="Scan to Verify"
               className="w-full h-full object-contain"
             />
-            <span className="text-[6px] sm:text-[7px] font-bold text-slate-800 tracking-tighter uppercase mt-0.5">
+            <span className="text-[5px] sm:text-[6px] font-bold text-slate-800 tracking-tighter uppercase mt-0.5 whitespace-nowrap">
               Scan to Verify
             </span>
           </div>

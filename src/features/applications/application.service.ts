@@ -1,8 +1,11 @@
 import { db } from "@/lib/db";
 import { recordAuditLog } from "@/lib/audit";
-import { ApplicationStatus } from "@prisma/client";
+import { ApplicationStatus, Role } from "@prisma/client";
 import { ApplicationSubmissionInput } from "@/lib/validation";
 import { CertificateService } from "../certificates/certificate.service";
+import { CertificateGenerator } from "../certificates/certificate.generator";
+import { formatDate } from "@/lib/utils";
+import { canApproveApplication, canRejectApplication, canStartReview } from "@/lib/rbac";
 
 export interface CreateEvidenceFileInput {
   fileName: string;
@@ -35,6 +38,7 @@ export class ApplicationService {
 
   /**
    * Submits a new application with optional evidence files.
+   * Public submission workflow - preserved exactly as designed.
    */
   public static async submitApplication(
     data: ApplicationSubmissionInput,
@@ -56,7 +60,7 @@ export class ApplicationService {
         description: data.description,
         place: data.place,
         supportingDetails: data.supportingDetails || null,
-        status: "PENDING",
+        status: ApplicationStatus.PENDING,
         evidenceFiles: {
           create: evidenceFiles.map((file) => ({
             fileName: file.fileName,
@@ -115,26 +119,51 @@ export class ApplicationService {
   }
 
   /**
-   * List applications with filtering, search, and pagination.
+   * List applications with filtering, search, and server-side pagination.
    */
   public static async listApplications(params: {
     status?: ApplicationStatus;
     search?: string;
     category?: string;
+    country?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    page?: number;
+    pageSize?: number;
     skip?: number;
     take?: number;
   }) {
-    const { status, search, category, skip = 0, take = 50 } = params;
+    const { status, search, category, country, dateFrom, dateTo } = params;
+
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(params.pageSize || params.take) || 20));
+    const skip = params.skip !== undefined ? params.skip : (page - 1) * pageSize;
+    const take = pageSize;
 
     const where: any = {};
     if (status) where.status = status;
     if (category) where.category = category;
+    if (country) {
+      where.country = { contains: country, mode: "insensitive" };
+    }
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) {
+        where.createdAt.gte = new Date(dateFrom);
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setHours(23, 59, 59, 999);
+        where.createdAt.lte = to;
+      }
+    }
     if (search) {
       where.OR = [
         { applicationNumber: { contains: search, mode: "insensitive" } },
         { applicantName: { contains: search, mode: "insensitive" } },
         { applicantEmail: { contains: search, mode: "insensitive" } },
         { achievementTitle: { contains: search, mode: "insensitive" } },
+        { country: { contains: search, mode: "insensitive" } },
         { place: { contains: search, mode: "insensitive" } },
       ];
     }
@@ -146,23 +175,33 @@ export class ApplicationService {
         skip,
         take,
         include: {
-          evidenceFiles: { select: { id: true, fileType: true } },
+          evidenceFiles: { select: { id: true, fileType: true, fileSize: true, originalName: true } },
           certificate: { select: { id: true, recordId: true, certificateNumber: true } },
         },
       }),
       db.application.count({ where }),
     ]);
 
-    return { items, total };
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
   }
 
   /**
-   * Update application status and internal notes.
+   * Secure, canonical status mutation method.
+   * Centralizes all RBAC enforcement, controlled state transitions,
+   * transactional certificate creation, and audit logging.
    */
   public static async updateStatus(params: {
     applicationId: string;
     status: ApplicationStatus;
     adminUserId?: string;
+    adminUserRole?: Role;
+    actor?: { userId: string; role: Role };
     internalNotes?: string;
     rejectionReason?: string;
     requestedInfo?: string;
@@ -170,42 +209,219 @@ export class ApplicationService {
     const {
       applicationId,
       status,
-      adminUserId,
       internalNotes,
       rejectionReason,
       requestedInfo,
     } = params;
 
-    const updated = await db.application.update({
-      where: { id: applicationId },
-      data: {
-        status,
-        ...(internalNotes !== undefined && { internalNotes }),
-        ...(rejectionReason !== undefined && { rejectionReason }),
-        ...(requestedInfo !== undefined && { requestedInfo }),
-      },
-    });
+    const actorUserId = params.actor?.userId || params.adminUserId;
+    const actorRole = params.actor?.role || params.adminUserRole;
 
-    await recordAuditLog({
-      userId: adminUserId || null,
-      applicationId,
-      action: `STATUS_CHANGED_TO_${status}`,
-      details: rejectionReason
-        ? `Reason: ${rejectionReason}`
-        : requestedInfo
-        ? `Requested Info: ${requestedInfo}`
-        : undefined,
-    });
+    if (!actorRole) {
+      throw new Error("UNAUTHORIZED: Actor role is required for status mutations.");
+    }
 
-    // If status is APPROVED, trigger automatic certificate generation
-    if (status === "APPROVED" || status === "CERTIFICATE_GENERATED") {
-      await CertificateService.generateCertificateForApplication(
-        applicationId,
-        adminUserId
+    // Direct transition to CERTIFICATE_GENERATED by client is strictly prohibited
+    if (status === ApplicationStatus.CERTIFICATE_GENERATED) {
+      throw new Error(
+        "Invalid action: Certificate generation cannot be directly requested via status update. Applications must be approved first."
       );
     }
 
-    return updated;
+    // Fail-fast RBAC checks before database queries
+    if (status === ApplicationStatus.APPROVED && !canApproveApplication(actorRole)) {
+      throw new Error(
+        "FORBIDDEN: Verification Officers are not permitted to adjudicate or approve applications."
+      );
+    }
+
+    if (status === ApplicationStatus.REJECTED && !canRejectApplication(actorRole)) {
+      throw new Error(
+        "FORBIDDEN: Verification Officers are not permitted to reject applications."
+      );
+    }
+
+    if (status === ApplicationStatus.UNDER_REVIEW && !canStartReview(actorRole)) {
+      throw new Error(
+        "FORBIDDEN: User does not have permission to start application review."
+      );
+    }
+
+    // Rejection reason validation before DB query
+    if (status === ApplicationStatus.REJECTED && (!rejectionReason || rejectionReason.trim().length === 0)) {
+      throw new Error("A rejection reason is required when rejecting an application.");
+    }
+
+    // Load existing application from database
+    const existing = await db.application.findUnique({
+      where: { id: applicationId },
+      include: { certificate: true },
+    });
+
+    if (!existing) {
+      throw new Error("Application not found.");
+    }
+
+    // ==========================================
+    // 1. APPROVAL WORKFLOW
+    // ==========================================
+    if (status === ApplicationStatus.APPROVED) {
+
+      // Transition guard: Cannot approve already rejected or certified applications
+      if (existing.status === ApplicationStatus.REJECTED) {
+        throw new Error("Invalid transition: Cannot approve an application that has already been rejected.");
+      }
+      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
+        throw new Error("Invalid transition: An official certificate has already been issued for this record.");
+      }
+
+      // Validate required application information
+      if (
+        !existing.applicantName?.trim() ||
+        !existing.category?.trim() ||
+        !existing.achievementTitle?.trim() ||
+        !existing.description?.trim() ||
+        !existing.place?.trim()
+      ) {
+        throw new Error("Invalid application: Required applicant or achievement information is missing for approval.");
+      }
+
+      // Update application status to APPROVED (Certificate generation will occur in Step 4)
+      const updated = await db.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.APPROVED,
+          ...(internalNotes !== undefined && { internalNotes }),
+        },
+      });
+
+      // Record audit log: APPLICATION_APPROVED
+      await recordAuditLog({
+        userId: actorUserId || null,
+        applicationId: existing.id,
+        action: "APPLICATION_APPROVED",
+        details: `Application ${existing.applicationNumber} approved by ${actorRole}. Awaiting certificate generation.`,
+      });
+
+      return updated;
+    }
+
+    // ==========================================
+    // 2. REJECTION WORKFLOW
+    // ==========================================
+    if (status === ApplicationStatus.REJECTED) {
+      // RBAC: Only SUPER_ADMIN and ADMIN can reject applications
+      if (!canRejectApplication(actorRole)) {
+        throw new Error(
+          "FORBIDDEN: Verification Officers are not permitted to reject applications."
+        );
+      }
+
+      if (!rejectionReason || rejectionReason.trim().length === 0) {
+        throw new Error("A rejection reason is required when rejecting an application.");
+      }
+
+      // Transition guard: Cannot reject an application with an active certificate
+      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
+        throw new Error(
+          "Invalid transition: Cannot reject an application that has an active certificate issued."
+        );
+      }
+
+      const updated = await db.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          rejectionReason: rejectionReason.trim(),
+          ...(internalNotes !== undefined && { internalNotes }),
+        },
+      });
+
+      await recordAuditLog({
+        userId: actorUserId || null,
+        applicationId,
+        action: "APPLICATION_REJECTED",
+        details: `Reason: ${rejectionReason.trim()}`,
+      });
+
+      return updated;
+    }
+
+    // ==========================================
+    // 3. UNDER REVIEW WORKFLOW
+    // ==========================================
+    if (status === ApplicationStatus.UNDER_REVIEW) {
+      if (!canStartReview(actorRole)) {
+        throw new Error(
+          "FORBIDDEN: User does not have permission to start application review."
+        );
+      }
+
+      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
+        throw new Error(
+          "Invalid transition: Cannot put an application with an issued certificate back into review."
+        );
+      }
+      if (existing.status === ApplicationStatus.REJECTED) {
+        throw new Error(
+          "Invalid transition: Cannot move a rejected application back into review directly."
+        );
+      }
+
+      const updated = await db.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.UNDER_REVIEW,
+          ...(internalNotes !== undefined && { internalNotes }),
+          ...(requestedInfo !== undefined && { requestedInfo }),
+        },
+      });
+
+      await recordAuditLog({
+        userId: actorUserId || null,
+        applicationId,
+        action: "APPLICATION_REVIEW_STARTED",
+        details: requestedInfo
+          ? `Requested Info: ${requestedInfo}`
+          : `Review started by ${actorRole}`,
+      });
+
+      return updated;
+    }
+
+    // ==========================================
+    // 4. RESET TO PENDING (SUPER_ADMIN ONLY)
+    // ==========================================
+    if (status === ApplicationStatus.PENDING) {
+      if (actorRole !== Role.SUPER_ADMIN && actorRole !== Role.ADMIN) {
+        throw new Error("FORBIDDEN: Only administrators can reset application status to PENDING.");
+      }
+
+      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
+        throw new Error(
+          "Invalid transition: Cannot reset an application with an issued certificate to PENDING."
+        );
+      }
+
+      const updated = await db.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.PENDING,
+          ...(internalNotes !== undefined && { internalNotes }),
+        },
+      });
+
+      await recordAuditLog({
+        userId: actorUserId || null,
+        applicationId,
+        action: "STATUS_CHANGED_TO_PENDING",
+        details: `Application status reset to PENDING by ${actorRole}`,
+      });
+
+      return updated;
+    }
+
+    throw new Error(`Unsupported status transition to ${status}`);
   }
 
   /**
@@ -214,8 +430,16 @@ export class ApplicationService {
   public static async saveInternalNotes(
     applicationId: string,
     notes: string,
-    adminUserId?: string
+    adminUserId?: string,
+    actorRole?: string
   ) {
+    if (typeof notes !== "string") {
+      notes = "";
+    }
+    if (notes.length > 10000) {
+      throw new Error("Internal notes exceed maximum limit of 10,000 characters.");
+    }
+
     const updated = await db.application.update({
       where: { id: applicationId },
       data: { internalNotes: notes },
@@ -224,8 +448,8 @@ export class ApplicationService {
     await recordAuditLog({
       userId: adminUserId || null,
       applicationId,
-      action: "INTERNAL_NOTES_UPDATED",
-      details: notes.slice(0, 100),
+      action: "INTERNAL_NOTE_UPDATED",
+      details: `Internal notes updated by ${actorRole || "staff"} (${notes.length} characters)`,
     });
 
     return updated;

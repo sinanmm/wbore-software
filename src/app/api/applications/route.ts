@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { ApplicationService } from "@/features/applications/application.service";
 import { applicationSubmissionSchema } from "@/lib/validation";
-import { storage, ALLOWED_EVIDENCE_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { getSession } from "@/lib/auth";
+import { validateEvidenceFile, sanitizeFilename } from "@/lib/file-security";
+import {
+  MAX_FILE_COUNT,
+  MAX_FILE_SIZE_BYTES,
+  MAX_TOTAL_EVIDENCE_SIZE_BYTES,
+  MAX_FILE_SIZE_MB,
+  MAX_TOTAL_SIZE_MB,
+} from "@/config/evidence-limits";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const uploadedFilesToCleanup: string[] = [];
+
   try {
     const contentType = request.headers.get("content-type") || "";
 
@@ -35,49 +45,75 @@ export async function POST(request: Request) {
       }
 
       // Process uploaded evidence files
-      const fileEntries = formData.getAll("evidenceFiles") as File[];
+      const rawFileEntries = formData.getAll("evidenceFiles") as File[];
+      const validFileEntries = rawFileEntries.filter(
+        (f) => f && typeof f !== "string" && f.size > 0
+      );
+
+      // Check max file count
+      if (validFileEntries.length > MAX_FILE_COUNT) {
+        return NextResponse.json(
+          { error: `Too many files uploaded. Maximum allowed is ${MAX_FILE_COUNT} files.` },
+          { status: 400 }
+        );
+      }
+
+      // Check total size
+      const totalSize = validFileEntries.reduce((acc, f) => acc + f.size, 0);
+      if (totalSize > MAX_TOTAL_EVIDENCE_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            error: `Total evidence size (${Math.round(
+              totalSize / (1024 * 1024)
+            )}MB) exceeds the maximum allowed limit of ${MAX_TOTAL_SIZE_MB}MB.`,
+          },
+          { status: 400 }
+        );
+      }
+
       const processedFiles = [];
 
-      for (const file of fileEntries) {
-        if (!file || typeof file === "string" || file.size === 0) continue;
-
+      for (const file of validFileEntries) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
           return NextResponse.json(
-            { error: `File ${file.name} exceeds 50MB limit` },
+            { error: `File "${file.name}" exceeds the maximum ${MAX_FILE_SIZE_MB}MB per-file limit.` },
             { status: 400 }
           );
         }
 
-        const mime = file.type || "application/octet-stream";
-        if (ALLOWED_EVIDENCE_MIME_TYPES.length > 0 && !ALLOWED_EVIDENCE_MIME_TYPES.includes(mime)) {
-          // Allow common image/doc types if mime check is too strict
-          if (!mime.startsWith("image/") && !mime.startsWith("video/") && !mime.includes("pdf")) {
-            return NextResponse.json(
-              { error: `File type ${mime} is not supported for ${file.name}` },
-              { status: 400 }
-            );
-          }
+        const buffer = Buffer.from(await file.arrayBuffer());
+
+        // Validate MIME type, extension, and magic bytes
+        const validation = validateEvidenceFile(buffer, file.name, file.type);
+        if (!validation.valid) {
+          return NextResponse.json(
+            { error: validation.error || `File "${file.name}" is not supported.` },
+            { status: 400 }
+          );
         }
 
-        const buffer = Buffer.from(await file.arrayBuffer());
+        const safeFilename = sanitizeFilename(file.name);
+
         const uploadResult = await storage.uploadFile(
           buffer,
-          file.name,
+          safeFilename,
           "evidence",
-          mime
+          validation.detectedMime || "application/octet-stream"
         );
 
+        uploadedFilesToCleanup.push(uploadResult.storageKey);
+
         processedFiles.push({
-          fileName: uploadResult.fileUrl.split("/").pop() || file.name,
-          originalName: file.name,
+          fileName: uploadResult.storageKey.split("/").pop() || safeFilename,
+          originalName: safeFilename,
           fileUrl: uploadResult.fileUrl,
-          fileType: mime,
+          fileType: validation.detectedMime || "application/octet-stream",
           fileSize: file.size,
         });
       }
 
       const clientIp =
-        request.headers.get("x-forwarded-for")?.split(",")[0] ||
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
         request.headers.get("x-real-ip") ||
         "unknown";
 
@@ -95,7 +131,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // JSON Payload submission
+    // JSON Payload submission (without multipart evidence files)
     const jsonBody = await request.json();
     const parsed = applicationSubmissionSchema.safeParse(jsonBody);
 
@@ -116,6 +152,18 @@ export async function POST(request: Request) {
     });
   } catch (error: any) {
     console.error("Application submission failed:", error);
+
+    // Transaction safety: Clean up any files that were uploaded if application creation fails
+    if (uploadedFilesToCleanup.length > 0) {
+      for (const storageKey of uploadedFilesToCleanup) {
+        try {
+          await storage.deleteFile(storageKey);
+        } catch (cleanupErr) {
+          console.warn("Failed to cleanup orphaned file:", storageKey, cleanupErr);
+        }
+      }
+    }
+
     return NextResponse.json(
       { error: error.message || "Failed to submit application" },
       { status: 500 }

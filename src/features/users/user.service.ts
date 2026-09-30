@@ -101,7 +101,7 @@ export class UserService {
 
     await recordAuditLog({
       userId: actorUserId,
-      action: "USER_ROLE_UPDATED",
+      action: "USER_ROLE_CHANGED",
       details: `Updated role of ${updated.email} to ${role}`,
     });
 

@@ -1,21 +1,21 @@
 import bcrypt from "bcryptjs";
-import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { Role } from "@prisma/client";
+import {
+  AUTH_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
+  SessionPayload,
+  createSessionToken,
+  verifySessionToken,
+} from "./session";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "wbre-super-secure-jwt-secret-key-32-chars-min-prod"
-);
-
-export const AUTH_COOKIE_NAME = "wbre_admin_session";
-
-export interface SessionPayload {
-  userId: string;
-  email: string;
-  name: string;
-  role: Role;
-  exp?: number;
-}
+export {
+  AUTH_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
+  createSessionToken,
+  verifySessionToken,
+};
+export type { SessionPayload };
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcrypt.genSalt(12);
@@ -29,23 +29,10 @@ export async function comparePassword(
   return bcrypt.compare(plain, hashed);
 }
 
-export async function createSessionToken(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("7d")
-    .sign(JWT_SECRET);
-}
-
-export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as unknown as SessionPayload;
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * Retrieves and validates the current active admin session from cookies.
+ * Returns null if unauthenticated or if token signature/expiration is invalid.
+ */
 export async function getSession(): Promise<SessionPayload | null> {
   try {
     const cookieStore = await cookies();
@@ -57,6 +44,10 @@ export async function getSession(): Promise<SessionPayload | null> {
   }
 }
 
+/**
+ * Enforces authentication and optional role restrictions.
+ * Throws UNAUTHORIZED or FORBIDDEN errors if criteria are not met.
+ */
 export async function requireAuth(allowedRoles?: Role[]): Promise<SessionPayload> {
   const session = await getSession();
   if (!session) {

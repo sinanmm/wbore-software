@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { UserService } from "@/features/users/user.service";
 import { getSession } from "@/lib/auth";
-import { Role } from "@prisma/client";
+import { canManageUsers } from "@/lib/rbac";
+import { createUserSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +13,9 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.role !== Role.SUPER_ADMIN) {
+    if (!canManageUsers(session.role)) {
       return NextResponse.json(
-        { error: "Forbidden: Super Admin access required" },
+        { error: "Forbidden: Super Administrator access required" },
         { status: 403 }
       );
     }
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.role !== Role.SUPER_ADMIN) {
+    if (!canManageUsers(session.role)) {
       return NextResponse.json(
         { error: "Forbidden: Only Super Administrators can create staff users." },
         { status: 403 }
@@ -44,21 +45,24 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, email, password, role } = body;
+    const parsed = createUserSchema.safeParse(body);
 
-    if (!name || !email || !password || !role) {
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0]?.message || "Validation failed";
       return NextResponse.json(
-        { error: "Name, email, password, and role are required." },
+        { error: firstIssue, details: parsed.error.format() },
         { status: 400 }
       );
     }
+
+    const { name, email, password, role } = parsed.data;
 
     const newUser = await UserService.createUser(
       {
         name,
         email,
         password,
-        role: role as Role,
+        role,
       },
       session.userId
     );

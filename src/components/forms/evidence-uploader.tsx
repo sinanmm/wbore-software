@@ -3,6 +3,13 @@
 import React, { useState, useRef } from "react";
 import { UploadCloud, File, Image as ImageIcon, Video, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
 import { formatFileSize } from "@/lib/utils";
+import {
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_MB,
+  MAX_FILE_COUNT,
+  MAX_TOTAL_EVIDENCE_SIZE_BYTES,
+  MAX_TOTAL_SIZE_MB,
+} from "@/config/evidence-limits";
 
 export interface EvidenceFileItem {
   file: File;
@@ -15,7 +22,7 @@ export interface EvidenceFileItem {
 export function EvidenceUploader({
   files,
   onChange,
-  maxFiles = 10,
+  maxFiles = MAX_FILE_COUNT,
 }: {
   files: EvidenceFileItem[];
   onChange: (files: EvidenceFileItem[]) => void;
@@ -54,8 +61,14 @@ export function EvidenceUploader({
         return;
       }
 
-      if (file.size > 50 * 1024 * 1024) {
-        alert(`File "${file.name}" exceeds 50MB maximum size.`);
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        alert(`File "${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB maximum size.`);
+        return;
+      }
+
+      const currentTotalBytes = [...files, ...addedItems].reduce((acc, f) => acc + f.file.size, 0);
+      if (currentTotalBytes + file.size > MAX_TOTAL_EVIDENCE_SIZE_BYTES) {
+        alert(`Adding "${file.name}" exceeds the total evidence limit of ${MAX_TOTAL_SIZE_MB}MB.`);
         return;
       }
 
@@ -118,7 +131,7 @@ export function EvidenceUploader({
           Drag and drop images, official PDF documents, or high-definition record videos.
         </p>
         <span className="text-[11px] text-amber-400/80 mt-2 font-medium">
-          Supported: PNG, JPG, PDF, MP4, MOV (Up to 50MB per file, max {maxFiles} files)
+          Supported: PNG, JPG, PDF, MP4, MOV (Up to {MAX_FILE_SIZE_MB}MB per file, max {maxFiles} files, {MAX_TOTAL_SIZE_MB}MB total)
         </span>
       </div>
 

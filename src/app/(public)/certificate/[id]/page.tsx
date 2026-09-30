@@ -32,8 +32,10 @@ export default async function CertificateDetailPage({
     notFound();
   }
 
+  const isRevoked = cert.verificationStatus === "REVOKED";
+
   return (
-    <div className="py-6 space-y-8">
+    <div className="py-6 space-y-8 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
         <Link
           href="/verify"
@@ -43,27 +45,43 @@ export default async function CertificateDetailPage({
           <span>Back to Verification Registry</span>
         </Link>
 
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
-          <ShieldCheck className="h-3.5 w-3.5" />
-          Official Verified Record
-        </div>
+        {isRevoked ? (
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold">
+            CERTIFICATE REVOKED
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            VERIFIED
+          </div>
+        )}
       </div>
 
-      <CertificatePreview
-        data={{
-          id: cert.id,
-          recipientName: cert.recipientName,
-          category: cert.category,
-          achievementTitle: cert.achievementTitle,
-          place: cert.place,
-          recordId: cert.recordId,
-          certificateNumber: cert.certificateNumber,
-          dateOfRecognition: formatDate(cert.issueDate),
-          pdfUrl: cert.pdfUrl,
-          qrCodeUrl: cert.qrCodeUrl,
-          verificationUrl: cert.verificationUrl,
-        }}
-      />
+      {isRevoked ? (
+        <div className="p-8 rounded-2xl bg-rose-950/20 border border-rose-500/40 text-center space-y-4">
+          <h2 className="text-2xl font-bold text-rose-300 font-serif">CERTIFICATE REVOKED</h2>
+          <p className="text-sm text-slate-300 max-w-md mx-auto">
+            This certificate record ({cert.recordId}) has been revoked by the World Book of Record
+            Excellence registry and is no longer valid.
+          </p>
+        </div>
+      ) : (
+        <CertificatePreview
+          data={{
+            id: cert.id,
+            recipientName: cert.recipientName,
+            category: cert.category,
+            achievementTitle: cert.achievementTitle,
+            place: cert.place,
+            recordId: cert.recordId,
+            certificateNumber: cert.certificateNumber,
+            dateOfRecognition: formatDate(cert.issueDate),
+            pdfUrl: cert.pdfUrl,
+            qrCodeUrl: cert.qrCodeUrl,
+            verificationUrl: cert.verificationUrl,
+          }}
+        />
+      )}
     </div>
   );
 }

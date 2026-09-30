@@ -37,17 +37,5 @@ export function formatFileSize(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-export function getCategoryCode(category: string): string {
-  const map: Record<string, string> = {
-    "Technology & Innovation": "TEC",
-    "Science & Research": "SCI",
-    "Sports & Athletics": "SPT",
-    "Arts & Culture": "ART",
-    "Business & Leadership": "BUS",
-    "Education & Academics": "EDU",
-    "Humanitarian & Social": "HUM",
-    "Environment & Sustainability": "ENV",
-    "Media & Entertainment": "MED",
-  };
-  return map[category] || "GEN";
-}
+export { getCategoryCode } from "@/config/categories";
+
