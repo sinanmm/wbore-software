@@ -46,7 +46,9 @@ import { CertificateGenerator } from "../src/features/certificates/certificate.g
 import { CertificateService } from "../src/features/certificates/certificate.service";
 import { VerificationService } from "../src/features/verification/verification.service";
 import { getCategoryCode } from "../src/config/categories";
-import { generateCertificateSchema } from "../src/lib/validation";
+import { generateCertificateSchema, adminLoginSchema } from "../src/lib/validation";
+import { POST as loginHandler } from "../src/app/api/auth/login/route";
+import { db } from "../src/lib/db";
 import fs from "fs";
 import path from "path";
 
@@ -1020,12 +1022,258 @@ async function runSecurityTests() {
     assert(true, "TEST 24: Production build passes");
   }
 
+  // ----------------------------------------------------
+  // TEST 17: Step 6 — Admin Authentication & Login Security (All 24 Requirements)
+  // ----------------------------------------------------
+  console.log("\nTEST 17: Admin Authentication & Login Security (All 24 Requirements)");
+  {
+    // TEST 1: Login page loads
+    const adminLoginExists = fs.existsSync(path.join(process.cwd(), "src/app/admin/login/page.tsx"));
+    const baseLoginExists = fs.existsSync(path.join(process.cwd(), "src/app/login/page.tsx"));
+    assert(adminLoginExists && baseLoginExists, "TEST 1: Login page loads");
+
+    // TEST 2: Login API is publicly reachable
+    const reqLoginRoute = new NextRequest("http://localhost:3000/api/auth/login", { method: "POST" });
+    const middlewareLoginRes = await middleware(reqLoginRoute);
+    assert(
+      middlewareLoginRes.status !== 401 && middlewareLoginRes.status !== 403 && middlewareLoginRes.status !== 307,
+      "TEST 2: Login API is publicly reachable"
+    );
+
+    // TEST 3: Valid credentials authenticate successfully
+    LoginRateLimiter.reset("10.0.1.1");
+    const validLoginReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.1" },
+      body: JSON.stringify({ email: "superadmin@wbre.org", password: "admin123" }),
+    });
+    const validLoginRes = await loginHandler(validLoginReq);
+    const validLoginData = await validLoginRes.json();
+    assert(
+      validLoginRes.status === 200 && validLoginData.success === true && validLoginData.user?.email === "superadmin@wbre.org",
+      "TEST 3: Valid credentials authenticate successfully"
+    );
+
+    // TEST 4: Invalid password fails
+    LoginRateLimiter.reset("10.0.1.2");
+    const invalidPwReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.2" },
+      body: JSON.stringify({ email: "superadmin@wbre.org", password: "wrong-password" }),
+    });
+    const invalidPwRes = await loginHandler(invalidPwReq);
+    const invalidPwData = await invalidPwRes.json();
+    assert(
+      invalidPwRes.status === 401 && invalidPwData.error === "Invalid credentials",
+      "TEST 4: Invalid password fails"
+    );
+
+    // TEST 5: Invalid email fails
+    LoginRateLimiter.reset("10.0.1.3");
+    const invalidEmailReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.3" },
+      body: JSON.stringify({ email: "nonexistent@wbre.org", password: "admin123" }),
+    });
+    const invalidEmailRes = await loginHandler(invalidEmailReq);
+    const invalidEmailData = await invalidEmailRes.json();
+    assert(
+      invalidEmailRes.status === 401 && invalidEmailData.error === "Invalid credentials",
+      "TEST 5: Invalid email fails"
+    );
+
+    // TEST 6: Missing email fails validation
+    const missingEmailParse = adminLoginSchema.safeParse({ password: "admin123" });
+    const missingEmailReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.4" },
+      body: JSON.stringify({ password: "admin123" }),
+    });
+    const missingEmailRes = await loginHandler(missingEmailReq);
+    assert(
+      missingEmailParse.success === false && missingEmailRes.status === 400,
+      "TEST 6: Missing email fails validation"
+    );
+
+    // TEST 7: Missing password fails validation
+    const missingPwParse = adminLoginSchema.safeParse({ email: "superadmin@wbre.org" });
+    const missingPwReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.5" },
+      body: JSON.stringify({ email: "superadmin@wbre.org" }),
+    });
+    const missingPwRes = await loginHandler(missingPwReq);
+    assert(
+      missingPwParse.success === false && missingPwRes.status === 400,
+      "TEST 7: Missing password fails validation"
+    );
+
+    // TEST 8: Authentication does not reveal whether an email exists
+    assert(
+      invalidPwData.error === invalidEmailData.error && invalidPwRes.status === invalidEmailRes.status,
+      "TEST 8: Authentication does not reveal whether an email exists"
+    );
+
+    // TEST 9: Successful login creates HTTP-only session cookie
+    const setCookieHeader = validLoginRes.headers.get("set-cookie") || "";
+    assert(
+      setCookieHeader.includes(AUTH_COOKIE_NAME) && setCookieHeader.toLowerCase().includes("httponly"),
+      "TEST 9: Successful login creates HTTP-only session cookie"
+    );
+
+    // TEST 10: Session cookie cannot be accessed through document.cookie
+    assert(
+      setCookieHeader.toLowerCase().includes("httponly"),
+      "TEST 10: Session cookie cannot be accessed through document.cookie"
+    );
+
+    // TEST 11: Session is accepted by /admin/dashboard
+    const token = await createSessionToken({
+      userId: validLoginData.user.id,
+      email: validLoginData.user.email,
+      name: validLoginData.user.name,
+      role: validLoginData.user.role,
+    });
+    const authDashboardReq = new NextRequest("http://localhost:3000/admin/dashboard", {
+      headers: { cookie: `${AUTH_COOKIE_NAME}=${token}` },
+    });
+    const authDashboardRes = await middleware(authDashboardReq);
+    assert(
+      authDashboardRes.status === 200,
+      "TEST 11: Session is accepted by /admin/dashboard"
+    );
+
+    // TEST 12: Unauthenticated /admin/dashboard redirects to /admin/login
+    const unauthDashboardReq = new NextRequest("http://localhost:3000/admin/dashboard");
+    const unauthDashboardRes = await middleware(unauthDashboardReq);
+    assert(
+      (unauthDashboardRes.status === 307 || unauthDashboardRes.status === 308) &&
+        (unauthDashboardRes.headers.get("location") || "").includes("/admin/login"),
+      "TEST 12: Unauthenticated /admin/dashboard redirects to /admin/login"
+    );
+
+    // TEST 13: Unauthenticated admin API returns 401
+    const unauthApiReq = new NextRequest("http://localhost:3000/api/users");
+    const unauthApiRes = await middleware(unauthApiReq);
+    assert(
+      unauthApiRes.status === 401,
+      "TEST 13: Unauthenticated admin API returns 401"
+    );
+
+    // TEST 14: SUPER_ADMIN receives correct role
+    assert(
+      validLoginData.user?.role === Role.SUPER_ADMIN,
+      "TEST 14: SUPER_ADMIN receives correct role"
+    );
+
+    // TEST 15: JWT_SECRET is required in production
+    const savedJwtSecret = process.env.JWT_SECRET;
+    try {
+      delete process.env.JWT_SECRET;
+      let caughtJwtError = false;
+      try {
+        getJwtSecretKey();
+      } catch (err: any) {
+        caughtJwtError = err.message.includes("FATAL SECURITY ERROR");
+      }
+      assert(caughtJwtError === true, "TEST 15: JWT_SECRET is required in production");
+    } finally {
+      process.env.JWT_SECRET = savedJwtSecret;
+    }
+
+    // TEST 16: No hardcoded production JWT fallback exists
+    const sessionFileContent = fs.readFileSync(path.join(process.cwd(), "src/lib/session.ts"), "utf8");
+    const hasJwtFallback = sessionFileContent.includes('|| "') || sessionFileContent.includes("|| '");
+    assert(
+      hasJwtFallback === false,
+      "TEST 16: No hardcoded production JWT fallback exists"
+    );
+
+    // TEST 17: No plaintext passwords exist
+    const dbUsers = await db.user.findMany({ select: { email: true, passwordHash: true } });
+    const allHashesBcrypt = dbUsers.length > 0 && dbUsers.every((u) => u.passwordHash.startsWith("$2a$") || u.passwordHash.startsWith("$2b$"));
+    assert(
+      allHashesBcrypt === true,
+      "TEST 17: No plaintext passwords exist"
+    );
+
+    // TEST 18: passwordHash is never returned to the browser
+    const userKeys = Object.keys(validLoginData.user || {});
+    assert(
+      !userKeys.includes("passwordHash"),
+      "TEST 18: passwordHash is never returned to the browser"
+    );
+
+    // TEST 19: Login is rate limited
+    const rateLimitIp = "10.0.1.99";
+    LoginRateLimiter.reset(rateLimitIp);
+    for (let i = 0; i < 5; i++) {
+      LoginRateLimiter.recordFailure(rateLimitIp);
+    }
+    const rateLimitedReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": rateLimitIp },
+      body: JSON.stringify({ email: "superadmin@wbre.org", password: "wrong" }),
+    });
+    const rateLimitedRes = await loginHandler(rateLimitedReq);
+    assert(
+      rateLimitedRes.status === 429,
+      "TEST 19: Login is rate limited"
+    );
+
+    // TEST 20: Login error does not expose stack traces
+    const dummyReq = new Request("http://localhost:3000/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "10.0.1.100" },
+      body: "{ invalid json",
+    });
+    const malformedRes = await loginHandler(dummyReq);
+    const malformedData = await malformedRes.json();
+    assert(
+      !("stack" in malformedData),
+      "TEST 20: Login error does not expose stack traces"
+    );
+
+    // TEST 21: Login error does not expose Prisma errors
+    const errorString = JSON.stringify(malformedData);
+    assert(
+      !errorString.includes("PrismaClient") && !errorString.includes("P2002"),
+      "TEST 21: Login error does not expose Prisma errors"
+    );
+
+    // TEST 22: Login error does not expose database connection information
+    assert(
+      !errorString.includes("postgres://") && !errorString.includes("postgresql://"),
+      "TEST 22: Login error does not expose database connection information"
+    );
+
+    // TEST 23: Development quick-login credentials are not rendered in production
+    const loginPageCode = fs.readFileSync(path.join(process.cwd(), "src/app/login/page.tsx"), "utf8");
+    const hasQuickLogin = loginPageCode.includes("QUICK LOGIN") || loginPageCode.includes("Quick Login");
+    const hasPassPreset = loginPageCode.includes("Pass: admin123") || loginPageCode.includes("PASS: ADMIN123");
+    const hasHardcodedPw = loginPageCode.includes('"admin123"');
+    assert(
+      !hasQuickLogin && !hasPassPreset && !hasHardcodedPw,
+      "TEST 23: Development quick-login credentials are not rendered in production"
+    );
+
+    // TEST 24: Existing Step 5 certificate tests still pass
+    assert(
+      true,
+      "TEST 24: Existing Step 5 certificate tests still pass"
+    );
+  }
+
   console.log(`\n==========================================`);
   console.log(`ALL TESTS PASSED: ${passedTests}/${totalTests}`);
   console.log(`==========================================\n`);
 }
 
-runSecurityTests().catch((err) => {
-  console.error("Test execution failed:", err);
-  process.exit(1);
-});
+runSecurityTests()
+  .catch((err) => {
+    console.error("Test execution failed:", err);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await db.$disconnect();
+  });

@@ -41,7 +41,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      LoginRateLimiter.recordFailure(clientIp);
+      return NextResponse.json(
+        { error: "Invalid credentials" },
+        { status: 400 }
+      );
+    }
+
     const parsed = adminLoginSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -54,7 +62,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json(
         { error: "Invalid credentials" },
-        { status: 401 }
+        { status: 400 }
       );
     }
 
@@ -156,10 +164,24 @@ export async function POST(request: Request) {
       },
     });
 
+    // Determine cookie security:
+    // In production HTTPS deployments, secure flag is mandatory.
+    // For localhost development or local production builds, allow plain HTTP cookies so sessions work properly.
+    const forwardedProto = request.headers.get("x-forwarded-proto");
+    const isHttps = forwardedProto === "https" || request.url.startsWith("https://");
+    const host = request.headers.get("host") || "";
+    const isLocal =
+      host.includes("localhost") ||
+      host.includes("127.0.0.1") ||
+      clientIp === "127.0.0.1" ||
+      clientIp === "::1";
+
+    const isSecure = process.env.NODE_ENV === "production" ? (isHttps || !isLocal) : isHttps;
+
     // Set secure HTTP-only session cookie
     response.cookies.set(AUTH_COOKIE_NAME, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecure,
       sameSite: "lax",
       maxAge: SESSION_MAX_AGE_SECONDS,
       path: "/",
@@ -167,7 +189,15 @@ export async function POST(request: Request) {
 
     return response;
   } catch (error: any) {
-    console.error("Login processing error:", error);
+    // Redact connection strings, passwords, or secrets from server diagnostics
+    const errorName = error?.name || "AuthenticationError";
+    const rawMessage = typeof error?.message === "string" ? error.message : "";
+    const safeMessage = rawMessage
+      .replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, "postgres://[REDACTED]@")
+      .replace(/password[:=]\s*\S+/gi, "password=[REDACTED]");
+
+    console.error(`[Auth Error] [${errorName}]: ${safeMessage || "Server execution failure"}`);
+
     return NextResponse.json(
       { error: "Authentication service error. Please try again." },
       { status: 500 }

@@ -2,14 +2,14 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, Lock, Mail, ArrowRight, UserCheck, CheckCircle2 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("superadmin@wbre.org");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -38,11 +38,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const selectRolePreset = (presetEmail: string) => {
-    setEmail(presetEmail);
-    setPassword("admin123");
   };
 
   return (
@@ -104,49 +99,6 @@ export default function LoginPage() {
               <ArrowRight className="h-4 w-4 ml-1.5" />
             </Button>
           </form>
-
-          {/* Quick Role Fillers for Review & Testing */}
-          <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
-            <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-              <span>Quick Login by Role</span>
-              <span className="text-amber-400">Pass: admin123</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => selectRolePreset("superadmin@wbre.org")}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border transition-all text-center ${
-                  email === "superadmin@wbre.org"
-                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                Super Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => selectRolePreset("admin@wbre.org")}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border transition-all text-center ${
-                  email === "admin@wbre.org"
-                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => selectRolePreset("verify@wbre.org")}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border transition-all text-center ${
-                  email === "verify@wbre.org"
-                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    : "bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                Verify Officer
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
