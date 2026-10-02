@@ -51,6 +51,18 @@ export function ApplicationReviewView({
   const [rejectionReason, setRejectionReason] = useState("");
   const [requestedInfo, setRequestedInfo] = useState("");
 
+  const isPending = application.status === "SUBMITTED" || application.status === "PENDING";
+  const isUnderReview =
+    application.status === "UNDER_INITIAL_REVIEW" ||
+    application.status === "UNDER_REVIEW" ||
+    application.status === "UNDER_VERIFICATION";
+  const isApproved = application.status === "APPROVED";
+  const hasCertificate = !!application.certificate || application.status === "CERTIFICATE_GENERATED";
+  const isRejected = application.status === "REJECTED";
+  const isVerificationOfficer =
+    currentUserRole === "VERIFICATION_OFFICER" ||
+    currentUserRole === "REVIEWER";
+
   const handleSaveNotes = async () => {
     setIsSavingNotes(true);
     try {
@@ -161,35 +173,36 @@ export function ApplicationReviewView({
         </div>
 
         {/* Adjudication Progress Pipeline */}
-        <div className="flex items-center gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-2">
+          {/* Step 1: Lodged */}
           <div className="flex items-center gap-1.5 font-medium">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                application.status === "PENDING"
-                  ? "bg-amber-400 animate-pulse"
-                  : "bg-emerald-500"
+                isPending ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
               }`}
             />
-            <span className={application.status === "PENDING" ? "text-amber-300 font-bold" : "text-slate-400"}>
+            <span className={isPending ? "text-amber-300 font-bold" : "text-slate-400"}>
               1. Lodged
             </span>
           </div>
           <span className="text-slate-600">→</span>
+
+          {/* Step 2: Under Review */}
           <div className="flex items-center gap-1.5 font-medium">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                application.status === "UNDER_REVIEW"
+                isUnderReview
                   ? "bg-blue-400 animate-pulse"
-                  : application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  : isApproved || hasCertificate || isRejected
                   ? "bg-emerald-500"
                   : "bg-slate-700"
               }`}
             />
             <span
               className={
-                application.status === "UNDER_REVIEW"
+                isUnderReview
                   ? "text-blue-300 font-bold"
-                  : application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
+                  : isApproved || hasCertificate || isRejected
                   ? "text-emerald-400"
                   : "text-slate-500"
               }
@@ -198,26 +211,49 @@ export function ApplicationReviewView({
             </span>
           </div>
           <span className="text-slate-600">→</span>
+
+          {/* Step 3: Approved / Rejected */}
           <div className="flex items-center gap-1.5 font-medium">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
-                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
-                  : application.status === "REJECTED"
+                isRejected
                   ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]"
+                  : isApproved || hasCertificate
+                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
                   : "bg-slate-700"
               }`}
             />
             <span
               className={
-                application.status === "APPROVED" || application.status === "CERTIFICATE_GENERATED"
-                  ? "text-emerald-300 font-bold"
-                  : application.status === "REJECTED"
+                isRejected
                   ? "text-rose-400 font-bold"
+                  : isApproved || hasCertificate
+                  ? "text-emerald-300 font-bold"
                   : "text-slate-500"
               }
             >
-              3. {application.status === "REJECTED" ? "Rejected" : "Approved"}
+              3. {isRejected ? "Rejected" : "Approved"}
+            </span>
+          </div>
+          <span className="text-slate-600">→</span>
+
+          {/* Step 4: Certificate Generated */}
+          <div className="flex items-center gap-1.5 font-medium">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                hasCertificate
+                  ? "bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse"
+                  : "bg-slate-700"
+              }`}
+            />
+            <span
+              className={
+                hasCertificate
+                  ? "text-amber-300 font-bold"
+                  : "text-slate-500"
+              }
+            >
+              4. Certificate Generated
             </span>
           </div>
         </div>
@@ -387,13 +423,14 @@ export function ApplicationReviewView({
             </div>
 
             <div className="space-y-3">
-              {/* If PENDING: Show Start Review Button */}
-              {application.status === "PENDING" && (
+              {/* If PENDING / SUBMITTED: Show Start Review Button */}
+              {isPending && (
                 <Button
                   variant="gold"
                   size="md"
                   onClick={() => handleStatusChange("UNDER_REVIEW")}
                   isLoading={actionLoading}
+                  disabled={actionLoading}
                   className="w-full font-bold shadow-gold justify-start"
                 >
                   <Clock className="h-4 w-4 mr-2" />
@@ -402,16 +439,16 @@ export function ApplicationReviewView({
               )}
 
               {/* If UNDER_REVIEW: Show Adjudication Options based on Role */}
-              {application.status === "UNDER_REVIEW" && (
+              {isUnderReview && (
                 <>
-                  {currentUserRole === "VERIFICATION_OFFICER" ? (
+                  {isVerificationOfficer ? (
                     <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
                       <p className="font-semibold text-slate-300 flex items-center gap-1.5">
                         <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
                         Adjudication Restricted
                       </p>
                       <p>
-                        Verification Officers can review evidence and record internal notes. Final approval and rejection require Administrator privileges.
+                        You can review this application, but approval or rejection requires an authorized administrator.
                       </p>
                     </div>
                   ) : (
@@ -457,7 +494,7 @@ export function ApplicationReviewView({
               )}
 
               {/* If APPROVED: Display Status Notice & Action to Generate Certificate */}
-              {application.status === "APPROVED" && (
+              {isApproved && !hasCertificate && (
                 <div className="space-y-3">
                   <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 text-xs text-emerald-300 space-y-1">
                     <p className="font-bold flex items-center gap-1.5 text-emerald-400">
@@ -469,12 +506,12 @@ export function ApplicationReviewView({
                     </p>
                   </div>
 
-                  {currentUserRole !== "VERIFICATION_OFFICER" ? (
+                  {!isVerificationOfficer ? (
                     <Button
                       variant="gold"
                       size="md"
                       onClick={() => setIsGenerateCertModalOpen(true)}
-                      disabled={isGeneratingCert}
+                      disabled={isGeneratingCert || actionLoading}
                       className="w-full font-bold shadow-gold justify-start"
                     >
                       <Award className="h-4 w-4 mr-2" />
@@ -495,7 +532,7 @@ export function ApplicationReviewView({
               )}
 
               {/* If REJECTED: Display Status Notice */}
-              {application.status === "REJECTED" && (
+              {isRejected && (
                 <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/40 text-xs text-rose-300 space-y-1">
                   <p className="font-bold flex items-center gap-1.5 text-rose-400">
                     <XCircle className="h-4 w-4" />
@@ -508,7 +545,7 @@ export function ApplicationReviewView({
               )}
 
               {/* If CERTIFICATE_GENERATED: Display Certificate Summary & Actions */}
-              {application.status === "CERTIFICATE_GENERATED" && application.certificate && (
+              {hasCertificate && application.certificate && (
                 <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-3">
                   <div className="space-y-1">
                     <p className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
@@ -603,34 +640,40 @@ export function ApplicationReviewView({
       {/* APPROVE CONFIRMATION MODAL */}
       <Modal
         isOpen={isApproveModalOpen}
-        onClose={() => setIsApproveModalOpen(false)}
-        title="Approve Record Application"
+        onClose={() => !actionLoading && setIsApproveModalOpen(false)}
+        title="Approve Application?"
         maxWidth="md"
       >
         <div className="space-y-4 text-xs">
-          <p className="text-slate-300">
-            Are you sure you want to approve this application?
-          </p>
+          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Applicant:</span>
+              <p className="text-sm font-bold text-white mt-0.5">{application.applicantName}</p>
+            </div>
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Achievement:</span>
+              <p className="text-xs font-medium text-amber-300 mt-0.5">{application.achievementTitle || application.proposedTitle}</p>
+            </div>
+            <div>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Category:</span>
+              <p className="text-xs font-medium text-slate-200 mt-0.5">{application.category || application.categoryName}</p>
+            </div>
+          </div>
 
-          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-            <p className="flex items-center gap-2 text-slate-200 font-semibold">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              Application status will transition to APPROVED
+          <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-slate-300 space-y-1">
+            <p className="font-semibold text-emerald-300">
+              This action will mark the application as APPROVED.
             </p>
-            <p className="flex items-center gap-2 text-slate-200 font-semibold">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              Administrative audit record (APPLICATION_APPROVED) will be recorded
-            </p>
-            <p className="flex items-center gap-2 text-slate-200 font-semibold">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-              Application will be queued for Certificate generation in the next phase
+            <p className="text-[11px] text-slate-400">
+              Certificate generation will be the next workflow stage.
             </p>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-3">
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
             <Button
               variant="ghost"
               size="sm"
+              disabled={actionLoading}
               onClick={() => setIsApproveModalOpen(false)}
             >
               Cancel
@@ -639,9 +682,10 @@ export function ApplicationReviewView({
               variant="gold"
               size="sm"
               isLoading={actionLoading}
+              disabled={actionLoading}
               onClick={() => handleStatusChange("APPROVED")}
             >
-              Confirm Approval
+              Approve Application
             </Button>
           </div>
         </div>

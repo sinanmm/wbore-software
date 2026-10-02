@@ -447,6 +447,14 @@ export class ApplicationService {
         throw new Error("Invalid transition: Cannot approve an application that has already been rejected.");
       }
 
+      if (existing.status === "SUBMITTED" || existing.status === "PENDING") {
+        throw new Error("Invalid transition: Application must be under review before it can be approved.");
+      }
+
+      if (existing.status === "CERTIFICATE_GENERATED") {
+        throw new Error("Invalid transition: Certificate has already been generated for this application.");
+      }
+
       if (
         !existing.applicantName?.trim() ||
         !existing.categoryName?.trim() ||
@@ -488,6 +496,14 @@ export class ApplicationService {
     // 2. REJECTION WORKFLOW
     // ==========================================
     if (status === "REJECTED") {
+      if (existing.status === "CERTIFICATE_GENERATED") {
+        throw new Error("Invalid transition: Cannot reject an application after a certificate has been generated.");
+      }
+
+      if (existing.status === "SUBMITTED" || existing.status === "PENDING") {
+        throw new Error("Invalid transition: Application must be under review before it can be rejected.");
+      }
+
       if (!rejectionReason || rejectionReason.trim().length === 0) {
         throw new Error("A rejection reason is required when rejecting an application.");
       }
@@ -526,6 +542,12 @@ export class ApplicationService {
       if (existing.status === "REJECTED") {
         throw new Error(
           "Invalid transition: Cannot move a rejected application back into review directly."
+        );
+      }
+
+      if (existing.status === "CERTIFICATE_GENERATED") {
+        throw new Error(
+          "Invalid transition: Cannot move an application with an issued certificate back into review."
         );
       }
 

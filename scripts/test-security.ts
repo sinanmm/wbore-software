@@ -1375,6 +1375,110 @@ async function runSecurityTests() {
     );
   }
 
+  // ----------------------------------------------------
+  // TEST 19: Evidence Preview, Storage Abstraction, Workflow & Adjudication
+  // ----------------------------------------------------
+  console.log("\nTEST 19: Evidence Preview, Storage Abstraction, Workflow & Adjudication");
+  {
+    // TEST 1: Canonical GET /api/applications/[id]/evidence/[evidenceId] route exists and requires authentication
+    const evidenceRoute = await import("../src/app/api/applications/[id]/evidence/[evidenceId]/route");
+    assert(typeof evidenceRoute.GET === "function", "TEST 1: Canonical GET evidence endpoint exists");
+    assert(typeof evidenceRoute.DELETE === "function", "TEST 2: Secure DELETE evidence endpoint exists");
+
+    const unauthReq = new NextRequest("http://localhost:3000/api/applications/app_123/evidence/ev_456");
+    const unauthRes = await evidenceRoute.GET(unauthReq, {
+      params: Promise.resolve({ id: "app_123", evidenceId: "ev_456" }),
+    });
+    assert(unauthRes.status === 401, "TEST 3: Unauthenticated request to canonical evidence endpoint returns 401");
+
+    // TEST 4: StorageAdapter interface compliance
+    const { LocalStorageAdapter, S3CompatibleStorageAdapter, getStorage } = await import("../src/lib/storage");
+    const localAdapter = new LocalStorageAdapter();
+    assert(typeof localAdapter.uploadFile === "function", "TEST 4: LocalStorageAdapter implements uploadFile");
+    assert(typeof localAdapter.getFile === "function", "TEST 5: LocalStorageAdapter implements getFile");
+    assert(typeof localAdapter.downloadFile === "function", "TEST 6: LocalStorageAdapter implements downloadFile");
+    assert(typeof localAdapter.deleteFile === "function", "TEST 7: LocalStorageAdapter implements deleteFile");
+    assert(typeof localAdapter.exists === "function", "TEST 8: LocalStorageAdapter implements exists");
+    assert(typeof localAdapter.getMetadata === "function", "TEST 9: LocalStorageAdapter implements getMetadata");
+
+    const s3Adapter = new S3CompatibleStorageAdapter();
+    assert(typeof s3Adapter.uploadFile === "function", "TEST 10: S3CompatibleStorageAdapter implements uploadFile");
+    assert(typeof s3Adapter.getFile === "function", "TEST 11: S3CompatibleStorageAdapter implements getFile");
+    assert(typeof s3Adapter.downloadFile === "function", "TEST 12: S3CompatibleStorageAdapter implements downloadFile");
+    assert(typeof s3Adapter.deleteFile === "function", "TEST 13: S3CompatibleStorageAdapter implements deleteFile");
+    assert(typeof s3Adapter.exists === "function", "TEST 14: S3CompatibleStorageAdapter implements exists");
+    assert(typeof s3Adapter.getMetadata === "function", "TEST 15: S3CompatibleStorageAdapter implements getMetadata");
+
+    const activeStorage = getStorage();
+    assert(typeof activeStorage.getFile === "function", "TEST 16: getStorage returns valid StorageAdapter instance");
+
+    // TEST 17: LocalStorageAdapter directory traversal protection
+    let traversalBlocked = false;
+    try {
+      await localAdapter.getFile("../../../etc/passwd");
+    } catch (err: any) {
+      if (err.message.includes("Security Error") || err.message.includes("Invalid path") || err.message.includes("not found")) {
+        traversalBlocked = true;
+      }
+    }
+    assert(traversalBlocked, "TEST 17: Directory traversal attempts are securely rejected");
+
+    // TEST 18: Evidence Viewer MIME category detection
+    const { getEvidenceFileTypeCategory } = await import("../src/components/admin/evidence-viewer");
+    const jpegCheck = getEvidenceFileTypeCategory(".jpeg", "my-record.jpeg");
+    assert(jpegCheck.isImage === true, "TEST 18: Extension .jpeg correctly recognized as image");
+
+    const pngCheck = getEvidenceFileTypeCategory("image/png", "photo.png");
+    assert(pngCheck.isImage === true, "TEST 19: image/png correctly recognized as image");
+
+    const pdfCheck = getEvidenceFileTypeCategory("application/pdf", "document.pdf");
+    assert(pdfCheck.isPdf === true, "TEST 20: PDF correctly recognized as PDF");
+
+    const videoCheck = getEvidenceFileTypeCategory("video/mp4", "attempt.mp4");
+    assert(videoCheck.isVideo === true, "TEST 21: MP4 correctly recognized as video");
+
+    // TEST 22: Forbidden status transitions
+    let directApprovalBlocked = false;
+    try {
+      await ApplicationService.updateStatus({
+        applicationId: "mock_app",
+        status: ApplicationStatus.CERTIFICATE_GENERATED,
+        actor: { userId: "admin", role: Role.SUPER_ADMIN },
+      });
+    } catch (err: any) {
+      if (err.message.includes("Invalid action") || err.message.includes("approved first")) {
+        directApprovalBlocked = true;
+      }
+    }
+    assert(directApprovalBlocked, "TEST 22: Transition to CERTIFICATE_GENERATED via updateStatus is forbidden");
+
+    // TEST 23: Rejection requires non-empty reason
+    let rejectionEmptyReasonBlocked = false;
+    try {
+      await ApplicationService.updateStatus({
+        applicationId: "mock_app",
+        status: ApplicationStatus.REJECTED,
+        rejectionReason: "",
+        actor: { userId: "admin", role: Role.SUPER_ADMIN },
+      });
+    } catch (err: any) {
+      if (err.message.includes("rejection reason is required")) {
+        rejectionEmptyReasonBlocked = true;
+      }
+    }
+    assert(rejectionEmptyReasonBlocked, "TEST 23: Rejection with empty reason is blocked");
+
+    // TEST 24: Public Verification Service privacy enforcement
+    const { VerificationService } = await import("../src/features/verification/verification.service");
+    const emptyVerify = await VerificationService.verify("");
+    assert(emptyVerify.isValid === false && emptyVerify.status === "NOT_FOUND", "TEST 24: Empty verification input returns NOT_FOUND");
+
+    const notFoundVerify = await VerificationService.verify("NON-EXISTENT-RECORD-ID-999999");
+    assert(notFoundVerify.isValid === false, "TEST 25: Non-existent record returns invalid");
+    assert(!("passwordHash" in notFoundVerify), "TEST 26: Verification never exposes passwordHash");
+    assert(!("internalNotes" in notFoundVerify), "TEST 27: Verification never exposes internalNotes");
+  }
+
   console.log(`\n==========================================`);
   console.log(`ALL TESTS PASSED: ${passedTests}/${totalTests}`);
   console.log(`==========================================\n`);

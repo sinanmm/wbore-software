@@ -54,9 +54,13 @@ export async function POST(request: Request) {
       error.message?.includes("boundary");
 
     const status = isForbidden ? 403 : isNotFound ? 404 : isStatusError ? 400 : 500;
+    const errorMessage =
+      status === 500
+        ? "Certificate generation failed. No certificate was issued. Please retry or contact a system administrator."
+        : error.message || "Failed to generate certificate";
 
     return NextResponse.json(
-      { error: error.message || "Failed to generate certificate" },
+      { error: errorMessage },
       { status }
     );
   }

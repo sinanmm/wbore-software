@@ -39,6 +39,48 @@ export interface EvidenceFileProps {
   createdAt: string | Date;
 }
 
+export function getEvidenceFileTypeCategory(fileType: string, filename: string) {
+  const lowerType = (fileType || "").toLowerCase().trim();
+  const lowerName = (filename || "").toLowerCase().trim();
+
+  const isImage =
+    lowerType.startsWith("image/") ||
+    lowerType === ".jpg" ||
+    lowerType === ".jpeg" ||
+    lowerType === ".png" ||
+    lowerType === ".webp" ||
+    lowerName.endsWith(".jpg") ||
+    lowerName.endsWith(".jpeg") ||
+    lowerName.endsWith(".png") ||
+    lowerName.endsWith(".webp");
+
+  const isVideo =
+    lowerType.startsWith("video/") ||
+    lowerType === ".mp4" ||
+    lowerType === ".mov" ||
+    lowerType === ".webm" ||
+    lowerName.endsWith(".mp4") ||
+    lowerName.endsWith(".mov") ||
+    lowerName.endsWith(".webm");
+
+  const isPdf =
+    lowerType === "application/pdf" ||
+    lowerType === ".pdf" ||
+    lowerType.includes("pdf") ||
+    lowerName.endsWith(".pdf");
+
+  const isDoc =
+    lowerType.includes("word") ||
+    lowerType.includes("document") ||
+    lowerType.includes("spreadsheet") ||
+    lowerType === ".doc" ||
+    lowerType === ".docx" ||
+    lowerName.endsWith(".doc") ||
+    lowerName.endsWith(".docx");
+
+  return { isImage, isVideo, isPdf, isDoc };
+}
+
 export function EvidenceViewer({
   files,
   applicationId,
@@ -51,6 +93,7 @@ export function EvidenceViewer({
   onEvidenceChange?: () => void;
 }) {
   const [selectedFile, setSelectedFile] = useState<EvidenceFileProps | null>(null);
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   // Add Evidence Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -244,18 +287,18 @@ export function EvidenceViewer({
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {files.map((file) => {
-            const isImage = file.fileType.startsWith("image/");
-            const isVideo = file.fileType.startsWith("video/");
-            const isPdf = file.fileType.includes("pdf");
-            const isDoc = file.fileType.includes("word") || file.fileType.includes("document");
+            const { isImage, isVideo, isDoc } = getEvidenceFileTypeCategory(
+              file.fileType,
+              file.originalName || file.fileName
+            );
 
-            const downloadEndpoint = applicationId
-              ? `/api/applications/${applicationId}/evidence/${file.id}/download`
+            const canonicalUrl = applicationId
+              ? `/api/applications/${applicationId}/evidence/${file.id}`
               : file.fileUrl;
 
-            const previewEndpoint = applicationId
-              ? `/api/applications/${applicationId}/evidence/${file.id}/preview`
-              : file.fileUrl;
+            const previewEndpoint = canonicalUrl;
+            const downloadEndpoint = `${canonicalUrl}?download=true`;
+            const imageFailed = !!failedImages[file.id];
 
             return (
               <div
@@ -264,13 +307,18 @@ export function EvidenceViewer({
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="h-12 w-12 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                    {isImage ? (
+                    {isImage && !imageFailed ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={previewEndpoint}
                         alt={file.originalName}
+                        onError={() =>
+                          setFailedImages((prev) => ({ ...prev, [file.id]: true }))
+                        }
                         className="h-full w-full object-cover"
                       />
+                    ) : isImage ? (
+                      <ImageIcon className="h-5 w-5 text-amber-400" />
                     ) : isVideo ? (
                       <Video className="h-5 w-5 text-indigo-400" />
                     ) : isDoc ? (
@@ -347,85 +395,98 @@ export function EvidenceViewer({
         title={selectedFile?.originalName || "Evidence Document"}
         maxWidth="4xl"
       >
-        {selectedFile && (
-          <div className="space-y-4">
-            <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center min-h-[350px] max-h-[70vh]">
-              {selectedFile.fileType.startsWith("image/") ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={
-                    applicationId
-                      ? `/api/applications/${applicationId}/evidence/${selectedFile.id}/preview`
-                      : selectedFile.fileUrl
-                  }
-                  alt={selectedFile.originalName}
-                  className="max-h-[68vh] w-auto object-contain rounded-lg"
-                />
-              ) : selectedFile.fileType.startsWith("video/") ? (
-                <video
-                  controls
-                  src={
-                    applicationId
-                      ? `/api/applications/${applicationId}/evidence/${selectedFile.id}/preview`
-                      : selectedFile.fileUrl
-                  }
-                  className="max-h-[68vh] w-full rounded-lg"
-                />
-              ) : selectedFile.fileType.includes("pdf") ? (
-                <div className="w-full h-[65vh] flex flex-col">
-                  <iframe
-                    src={
-                      applicationId
-                        ? `/api/applications/${applicationId}/evidence/${selectedFile.id}/preview#toolbar=1`
-                        : selectedFile.fileUrl
-                    }
-                    className="w-full flex-1 rounded-lg border border-slate-800"
-                    title={selectedFile.originalName}
-                  />
-                </div>
-              ) : (
-                <div className="p-8 text-center space-y-4">
-                  <FileText className="h-16 w-16 mx-auto text-blue-400" />
-                  <div>
-                    <p className="text-sm font-semibold text-white">{selectedFile.originalName}</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Document format: {selectedFile.fileType} ({formatFileSize(selectedFile.fileSize)})
-                    </p>
-                  </div>
-                  <a
-                    href={
-                      applicationId
-                        ? `/api/applications/${applicationId}/evidence/${selectedFile.id}/download`
-                        : selectedFile.fileUrl
-                    }
-                    download={selectedFile.originalName}
-                  >
-                    <Button variant="gold" size="sm">
-                      <Download className="h-3.5 w-3.5 mr-1.5" />
-                      Download File to View
-                    </Button>
-                  </a>
-                </div>
-              )}
-            </div>
+        {selectedFile && (() => {
+          const { isImage, isVideo, isPdf } = getEvidenceFileTypeCategory(
+            selectedFile.fileType,
+            selectedFile.originalName || selectedFile.fileName
+          );
 
-            <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-              <span>File size: {formatFileSize(selectedFile.fileSize)}</span>
-              <a
-                href={
-                  applicationId
-                    ? `/api/applications/${applicationId}/evidence/${selectedFile.id}/download`
-                    : selectedFile.fileUrl
-                }
-                download={selectedFile.originalName}
-                className="text-amber-400 hover:underline flex items-center gap-1 font-semibold"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download Original File
-              </a>
+          const canonicalUrl = applicationId
+            ? `/api/applications/${applicationId}/evidence/${selectedFile.id}`
+            : selectedFile.fileUrl;
+
+          const previewEndpoint = canonicalUrl;
+          const downloadEndpoint = `${canonicalUrl}?download=true`;
+          const imageFailed = !!failedImages[selectedFile.id];
+
+          return (
+            <div className="space-y-4">
+              <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center min-h-[350px] max-h-[70vh]">
+                {isImage && !imageFailed ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewEndpoint}
+                    alt={selectedFile.originalName}
+                    onError={() =>
+                      setFailedImages((prev) => ({ ...prev, [selectedFile.id]: true }))
+                    }
+                    className="max-h-[68vh] w-auto object-contain rounded-lg"
+                  />
+                ) : isImage && imageFailed ? (
+                  <div className="p-8 text-center space-y-4">
+                    <div className="h-16 w-16 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                      <ImageIcon className="h-8 w-8" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white">{selectedFile.originalName}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Inline preview unavailable. Please download the file to inspect the original evidence.
+                      </p>
+                    </div>
+                    <a href={downloadEndpoint} download={selectedFile.originalName}>
+                      <Button variant="gold" size="sm">
+                        <Download className="h-3.5 w-3.5 mr-1.5" />
+                        Download Original File
+                      </Button>
+                    </a>
+                  </div>
+                ) : isVideo ? (
+                  <video
+                    controls
+                    src={previewEndpoint}
+                    className="max-h-[68vh] w-full rounded-lg"
+                  />
+                ) : isPdf ? (
+                  <div className="w-full h-[65vh] flex flex-col">
+                    <iframe
+                      src={`${previewEndpoint}#toolbar=1`}
+                      className="w-full flex-1 rounded-lg border border-slate-800"
+                      title={selectedFile.originalName}
+                    />
+                  </div>
+                ) : (
+                  <div className="p-8 text-center space-y-4">
+                    <FileText className="h-16 w-16 mx-auto text-blue-400" />
+                    <div>
+                      <p className="text-sm font-semibold text-white">{selectedFile.originalName}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Document format: {selectedFile.fileType} ({formatFileSize(selectedFile.fileSize)})
+                      </p>
+                    </div>
+                    <a href={downloadEndpoint} download={selectedFile.originalName}>
+                      <Button variant="gold" size="sm">
+                        <Download className="h-3.5 w-3.5 mr-1.5" />
+                        Download File to View
+                      </Button>
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
+                <span>File size: {formatFileSize(selectedFile.fileSize)}</span>
+                <a
+                  href={downloadEndpoint}
+                  download={selectedFile.originalName}
+                  className="text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download Original File
+                </a>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* ============================================================ */}
@@ -572,7 +633,7 @@ export function EvidenceViewer({
               <p className="font-semibold text-rose-200">Warning: Irreversible Administrative Action</p>
               <p className="text-[11px] leading-relaxed">
                 This will permanently delete the evidence file{" "}
-                <strong className="text-white">"{fileToRemove.originalName}"</strong> ({formatFileSize(fileToRemove.fileSize)})
+                <strong className="text-white">&quot;{fileToRemove.originalName}&quot;</strong> ({formatFileSize(fileToRemove.fileSize)})
                 from physical storage and from this application record.
               </p>
             </div>
