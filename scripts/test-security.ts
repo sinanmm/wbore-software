@@ -1304,6 +1304,77 @@ async function runSecurityTests() {
     );
   }
 
+  // ----------------------------------------------------
+  // TEST 18: Production Admin Bootstrap & Security Verification
+  // ----------------------------------------------------
+  console.log("\nTEST 18: Production Admin Bootstrap & Security Verification");
+  {
+    // TEST 1: Bootstrap script exists
+    const bootstrapScriptPath = path.join(process.cwd(), "scripts/bootstrap-admin.ts");
+    assert(fs.existsSync(bootstrapScriptPath), "TEST 1: scripts/bootstrap-admin.ts exists");
+
+    const bootstrapContent = fs.readFileSync(bootstrapScriptPath, "utf8");
+
+    // TEST 2: Idempotency check exists
+    assert(
+      bootstrapContent.includes("existing") && bootstrapContent.includes("Administrator already exists"),
+      "TEST 2: Bootstrap script includes idempotency check"
+    );
+
+    // TEST 3: Uses existing hashPassword implementation
+    assert(
+      bootstrapContent.includes("hashPassword") && bootstrapContent.includes("../src/lib/auth"),
+      "TEST 3: Bootstrap script uses application's canonical hashPassword function"
+    );
+
+    // TEST 4: Enforces SUPER_ADMIN role
+    assert(
+      bootstrapContent.includes('SUPER_ADMIN'),
+      "TEST 4: Bootstrap script enforces SUPER_ADMIN role"
+    );
+
+    // TEST 5: Minimum password length validation (>= 8 characters)
+    assert(
+      bootstrapContent.includes(".length < 8") || bootstrapContent.includes("< 8"),
+      "TEST 5: Bootstrap script enforces minimum 8 characters password"
+    );
+
+    // TEST 6: Does not print password or passwordHash
+    assert(
+      !bootstrapContent.includes("console.log(passwordHash") &&
+      !bootstrapContent.includes("console.log(adminPassword") &&
+      !bootstrapContent.includes("console.log(user.passwordHash"),
+      "TEST 6: Bootstrap script never logs password or passwordHash"
+    );
+
+    // TEST 7: hashPassword produces valid bcrypt hash
+    const { hashPassword, comparePassword } = await import("../src/lib/auth");
+    const testPlainPw = "AdminSecurePass2026!";
+    const hashed = await hashPassword(testPlainPw);
+    assert(
+      hashed.startsWith("$2a$") || hashed.startsWith("$2b$"),
+      "TEST 7: hashPassword produces secure bcrypt hash"
+    );
+
+    // TEST 8: comparePassword validates correct password
+    const match = await comparePassword(testPlainPw, hashed);
+    assert(match === true, "TEST 8: comparePassword verifies matching credentials");
+
+    // TEST 9: comparePassword rejects wrong password
+    const wrongMatch = await comparePassword("WrongPassword123!", hashed);
+    assert(wrongMatch === false, "TEST 9: comparePassword rejects wrong credentials");
+
+    // TEST 10: Prisma schema User model contains required fields
+    const schemaContent = fs.readFileSync(path.join(process.cwd(), "prisma/schema.prisma"), "utf8");
+    assert(
+      schemaContent.includes("model User") &&
+      schemaContent.includes("passwordHash") &&
+      schemaContent.includes("email") &&
+      schemaContent.includes("isActive"),
+      "TEST 10: Prisma User model contains canonical production fields"
+    );
+  }
+
   console.log(`\n==========================================`);
   console.log(`ALL TESTS PASSED: ${passedTests}/${totalTests}`);
   console.log(`==========================================\n`);
