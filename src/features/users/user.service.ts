@@ -1,5 +1,5 @@
 import { db } from "@/lib/prisma";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 import { hashPassword } from "@/lib/auth";
 import { recordAuditLog } from "@/lib/audit";
 
@@ -22,6 +22,7 @@ export class UserService {
         name: true,
         email: true,
         role: true,
+        isActive: true,
         createdAt: true,
         updatedAt: true,
       },

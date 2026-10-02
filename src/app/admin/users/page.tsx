@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { UserService } from "@/features/users/user.service";
 import { UsersTableView } from "@/components/admin/users-table-view";
 import { redirect } from "next/navigation";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 
 export const dynamic = "force-dynamic";
 

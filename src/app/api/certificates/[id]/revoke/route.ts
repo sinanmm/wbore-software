@@ -94,7 +94,7 @@ export async function POST(
           recordId: result.certificate.recordId,
           certificateNumber: result.certificate.certificateNumber,
           recipientName: result.certificate.recipientName,
-          verificationStatus: result.certificate.verificationStatus,
+          verificationStatus: result.certificate.verificationStatus || result.certificate.status,
         },
       },
       { status: 200 }

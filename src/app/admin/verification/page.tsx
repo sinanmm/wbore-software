@@ -15,13 +15,13 @@ export default async function AdminVerificationAuditPage() {
       where: {
         action: "CERTIFICATE_VERIFIED",
       },
-      orderBy: { timestamp: "desc" },
+      orderBy: { createdAt: "desc" },
       take: 50,
       include: {
-        application: {
+        user: {
           select: {
-            applicationNumber: true,
-            applicantName: true,
+            name: true,
+            email: true,
           },
         },
       },
@@ -63,12 +63,12 @@ export default async function AdminVerificationAuditPage() {
                 <tr>
                   <th className="px-5 py-4">Action</th>
                   <th className="px-5 py-4">Record Identifier</th>
-                  <th className="px-5 py-4">Related Application</th>
+                  <th className="px-5 py-4">Related Entity</th>
                   <th className="px-5 py-4">Source IP</th>
                   <th className="px-5 py-4">Timestamp</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y border-slate-800/60">
                 {verificationLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="px-5 py-3.5">
@@ -81,9 +81,9 @@ export default async function AdminVerificationAuditPage() {
                       {log.details || "N/A"}
                     </td>
                     <td className="px-5 py-3.5 text-slate-200">
-                      {log.application ? (
+                      {log.entityId ? (
                         <span>
-                          {log.application.applicationNumber} ({log.application.applicantName})
+                          {log.entity}: {log.entityId}
                         </span>
                       ) : (
                         "Direct Query"
@@ -93,7 +93,7 @@ export default async function AdminVerificationAuditPage() {
                       {log.ipAddress || "Internal"}
                     </td>
                     <td className="px-5 py-3.5 text-slate-400 font-mono">
-                      {formatDateTime(log.timestamp)}
+                      {formatDateTime(log.createdAt)}
                     </td>
                   </tr>
                 ))}

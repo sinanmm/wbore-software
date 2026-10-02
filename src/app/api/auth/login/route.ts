@@ -77,12 +77,13 @@ export async function POST(request: Request) {
         name: true,
         email: true,
         role: true,
+        isActive: true,
         passwordHash: true,
       },
     });
 
-    // If user not found, perform dummy comparison to prevent timing enumeration
-    if (!user) {
+    // If user not found or inactive, perform dummy comparison to prevent timing enumeration
+    if (!user || user.isActive === false) {
       await comparePassword(password, DUMMY_HASH);
       const failure = LoginRateLimiter.recordFailure(clientIp);
 

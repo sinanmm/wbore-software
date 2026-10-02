@@ -51,10 +51,12 @@ export class VerificationService {
         };
       }
 
-      // Check if certificate has been revoked
-      if (cert.verificationStatus === "REVOKED") {
+      const isRevoked = cert.status === "REVOKED" || cert.verificationStatus === "REVOKED";
+
+      if (isRevoked) {
         await recordAuditLog({
-          applicationId: cert.applicationId,
+          entity: "CERTIFICATE",
+          entityId: cert.id,
           action: "CERTIFICATE_REVOCATION_CHECKED",
           details: `Revoked certificate queried: ${cert.recordId}`,
           ipAddress: ipAddress || null,
@@ -67,13 +69,13 @@ export class VerificationService {
             recordId: cert.recordId,
             certificateNumber: cert.certificateNumber,
             recipientName: cert.recipientName,
-            category: cert.category,
-            achievementTitle: cert.achievementTitle,
-            place: cert.place,
+            category: cert.category || "General",
+            achievementTitle: cert.achievementTitle || cert.recordTitle,
+            place: cert.place || cert.location,
             issueDate: cert.issueDate,
             verificationStatus: "REVOKED",
             downloadUrl: `/api/verification/${encodeURIComponent(cert.recordId)}/certificate`,
-            verificationUrl: cert.verificationUrl,
+            verificationUrl: cert.verificationUrl || null,
           },
           verifiedAt: new Date(),
           message: "CERTIFICATE REVOKED",
@@ -81,7 +83,8 @@ export class VerificationService {
       }
 
       await recordAuditLog({
-        applicationId: cert.applicationId,
+        entity: "CERTIFICATE",
+        entityId: cert.id,
         action: "CERTIFICATE_VERIFIED",
         details: `Record verified: ${cert.recordId} (${cert.certificateNumber})`,
         ipAddress: ipAddress || null,
@@ -94,13 +97,13 @@ export class VerificationService {
           recordId: cert.recordId,
           certificateNumber: cert.certificateNumber,
           recipientName: cert.recipientName,
-          category: cert.category,
-          achievementTitle: cert.achievementTitle,
-          place: cert.place,
+          category: cert.category || "General",
+          achievementTitle: cert.achievementTitle || cert.recordTitle,
+          place: cert.place || cert.location,
           issueDate: cert.issueDate,
-          verificationStatus: cert.verificationStatus,
+          verificationStatus: "VALID",
           downloadUrl: `/api/verification/${encodeURIComponent(cert.recordId)}/certificate`,
-          verificationUrl: cert.verificationUrl,
+          verificationUrl: cert.verificationUrl || null,
         },
         verifiedAt: new Date(),
         message: "VERIFIED",

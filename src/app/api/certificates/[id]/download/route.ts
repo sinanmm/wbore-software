@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
 import { getSession } from "@/lib/auth";
+import { CertificateService } from "@/features/certificates/certificate.service";
 import { CertificateGenerator } from "@/features/certificates/certificate.generator";
 import { formatDate } from "@/lib/utils";
 
@@ -10,12 +10,6 @@ export const dynamic = "force-dynamic";
 /**
  * Admin Certificate Download Endpoint
  * GET /api/certificates/[id]/download
- * 
- * Strict Admin Download Behavior:
- * - Requires active authenticated session (401 if unauthenticated).
- * - SUPER_ADMIN & ADMIN: Authorized to download certificate PDF, including REVOKED certificates
- *   (preserving historical record without modifying the underlying PDF).
- * - VERIFICATION_OFFICER: Permitted for VALID certificates; blocked from downloading REVOKED certificates (403).
  */
 export async function GET(
   request: Request,
@@ -34,16 +28,8 @@ export async function GET(
     const { id } = await params;
     const cleanId = decodeURIComponent(id || "").trim();
 
-    // 2. Find certificate by id, recordId, or certificateNumber
-    const cert = await db.certificate.findFirst({
-      where: {
-        OR: [
-          { id: cleanId },
-          { recordId: { equals: cleanId, mode: "insensitive" } },
-          { certificateNumber: { equals: cleanId, mode: "insensitive" } },
-        ],
-      },
-    });
+    // 2. Find certificate
+    const cert = await CertificateService.findByRecordOrCertNumber(cleanId);
 
     if (!cert) {
       return NextResponse.json(
@@ -53,39 +39,38 @@ export async function GET(
     }
 
     // 3. RBAC & Status Handling for Admin Download
-    const isRevoked = cert.verificationStatus === "REVOKED";
+    const isRevoked = cert.status === "REVOKED" || cert.verificationStatus === "REVOKED";
     if (isRevoked) {
-      if (session.role === "VERIFICATION_OFFICER") {
+      if (session.role === "VERIFICATION_OFFICER" || session.role === "REVIEWER") {
         return NextResponse.json(
-          { error: "Forbidden: Verification Officers cannot download revoked certificates." },
+          { error: "Forbidden: Reviewers and Verification Officers cannot download revoked certificates." },
           { status: 403 }
         );
       }
-      // SUPER_ADMIN and ADMIN are permitted to download historical PDF of revoked certificates
     }
 
     let pdfBuffer: Buffer | null = null;
 
-    // 4. Try reading existing PDF from storage
-    const storagePath = cert.pdfUrl || cert.certificatePdfUrl;
-    try {
-      if (storagePath) {
+    // 4. Try reading existing PDF from storage if available
+    const storagePath = cert.pdfUrl;
+    if (storagePath && !storagePath.startsWith("/api/")) {
+      try {
         pdfBuffer = await storage.getFile(storagePath);
+      } catch {
+        pdfBuffer = null;
       }
-    } catch {
-      pdfBuffer = null;
     }
 
-    // 5. Fallback if file missing from local disk: generate historical replica
+    // 5. Generate high-resolution PDF if not pre-stored
     if (!pdfBuffer) {
       const generated = await CertificateGenerator.generate({
         recipientName: cert.recipientName,
-        category: cert.category,
-        achievementTitle: cert.achievementTitle,
-        place: cert.place,
+        category: cert.category || "General",
+        achievementTitle: cert.achievementTitle || cert.recordTitle,
+        place: cert.place || cert.location,
         recordId: cert.recordId,
         certificateNumber: cert.certificateNumber,
-        dateOfRecognition: formatDate(cert.issueDate),
+        dateOfRecognition: formatDate(cert.achievementDate || cert.issueDate),
       });
       pdfBuffer = generated.pdfBuffer;
     }

@@ -70,15 +70,15 @@ export default async function CertificateDetailPage({
           data={{
             id: cert.id,
             recipientName: cert.recipientName,
-            category: cert.category,
-            achievementTitle: cert.achievementTitle,
-            place: cert.place,
+            category: cert.category || "General",
+            achievementTitle: cert.achievementTitle || cert.recordTitle,
+            place: cert.place || cert.location,
             recordId: cert.recordId,
             certificateNumber: cert.certificateNumber,
-            dateOfRecognition: formatDate(cert.issueDate),
+            dateOfRecognition: formatDate(cert.achievementDate || cert.issueDate),
             pdfUrl: cert.pdfUrl,
-            qrCodeUrl: cert.qrCodeUrl,
-            verificationUrl: cert.verificationUrl,
+            qrCodeUrl: cert.qrCodeUrl || undefined,
+            verificationUrl: cert.verificationUrl || undefined,
           }}
         />
       )}

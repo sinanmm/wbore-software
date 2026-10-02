@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 
 /**
  * World Book of Record Excellence (WBRE) Role-Based Access Control (RBAC)
@@ -6,8 +6,9 @@ import { Role } from "@prisma/client";
  * Roles:
  * - SUPER_ADMIN: Full administrative access (users, settings, applications, certificates, adjudication, evidence)
  * - ADMIN: Adjudication management, evidence review, approve/reject applications, certificate issuance, add/remove evidence
- * - VERIFICATION_OFFICER: View applications, review evidence, preview/download evidence, inspect certificates, audit lookups.
+ * - REVIEWER / ADJUDICATOR / VERIFICATION_OFFICER: View applications, review evidence, preview/download evidence, inspect certificates, audit lookups.
  *   RESTRICTED: Cannot approve, reject, generate certificates, revoke certificates, manage users, or add/remove evidence.
+ * - CONTENT_MANAGER: Read-only access to records and certificates.
  */
 
 export const RolePermissions = {
@@ -18,26 +19,26 @@ export const RolePermissions = {
   MANAGE_SETTINGS: [Role.SUPER_ADMIN],
 
   // Application Adjudication
-  VIEW_APPLICATIONS: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
-  START_REVIEW: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
+  VIEW_APPLICATIONS: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
+  START_REVIEW: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
   APPROVE_APPLICATION: [Role.SUPER_ADMIN, Role.ADMIN],
   REJECT_APPLICATION: [Role.SUPER_ADMIN, Role.ADMIN],
 
   // Evidence Operations
-  VIEW_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
-  DOWNLOAD_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
+  VIEW_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
+  DOWNLOAD_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
   UPLOAD_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN],
   REMOVE_EVIDENCE: [Role.SUPER_ADMIN, Role.ADMIN],
-  DOWNLOAD_DOSSIER: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
+  DOWNLOAD_DOSSIER: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
 
   // Certificate Operations
-  VIEW_CERTIFICATES: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
+  VIEW_CERTIFICATES: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.CONTENT_MANAGER, Role.VERIFICATION_OFFICER],
   GENERATE_CERTIFICATE: [Role.SUPER_ADMIN, Role.ADMIN],
   REVOKE_CERTIFICATE: [Role.SUPER_ADMIN, Role.ADMIN],
 
   // Verification Operations
-  PERFORM_VERIFICATION: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
-  VIEW_AUDIT_LOGS: [Role.SUPER_ADMIN, Role.ADMIN, Role.VERIFICATION_OFFICER],
+  PERFORM_VERIFICATION: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.CONTENT_MANAGER, Role.VERIFICATION_OFFICER],
+  VIEW_AUDIT_LOGS: [Role.SUPER_ADMIN, Role.ADMIN, Role.REVIEWER, Role.ADJUDICATOR, Role.VERIFICATION_OFFICER],
 } as const;
 
 export type Permission = keyof typeof RolePermissions;

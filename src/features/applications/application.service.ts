@@ -1,10 +1,13 @@
 import { db } from "@/lib/db";
 import { recordAuditLog } from "@/lib/audit";
-import { ApplicationStatus, Role } from "@prisma/client";
+import {
+  ApplicationStatus,
+  Role,
+  ApplicationDetail,
+  ApplicationEvidenceSummary,
+  CertificateSummary,
+} from "@/types";
 import { ApplicationSubmissionInput } from "@/lib/validation";
-import { CertificateService } from "../certificates/certificate.service";
-import { CertificateGenerator } from "../certificates/certificate.generator";
-import { formatDate } from "@/lib/utils";
 import { canApproveApplication, canRejectApplication, canStartReview } from "@/lib/rbac";
 
 export interface CreateEvidenceFileInput {
@@ -15,20 +18,91 @@ export interface CreateEvidenceFileInput {
   fileSize: number;
 }
 
+export function toApplicationDetail(
+  app: any,
+  cert?: CertificateSummary | null
+): ApplicationDetail {
+  const evidences: ApplicationEvidenceSummary[] = (app.evidences || []).map((e: any) => ({
+    id: e.id,
+    applicationId: e.applicationId,
+    fileName: e.fileName,
+    originalName: e.originalName,
+    fileType: e.fileType,
+    fileSize: e.fileSize,
+    fileUrl: e.fileUrl,
+    storageProvider: e.storageProvider || "LOCAL",
+    evidenceCategory: e.evidenceCategory || "GENERAL",
+    uploadedBy: e.uploadedBy || "APPLICANT",
+    status: e.status || "PENDING",
+    rejectionReason: e.rejectionReason || null,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  }));
+
+  const lastRejection = app.statusHistory?.find?.((h: any) => h.status === "REJECTED");
+  const lastRequested = app.statusHistory?.find?.((h: any) => h.status === "MORE_INFORMATION_REQUIRED");
+
+  return {
+    id: app.id,
+    applicationNumber: app.applicationNumber,
+    applicantType: app.applicantType || "Individual",
+    applicantName: app.applicantName,
+    organizationName: app.organizationName || null,
+    email: app.email,
+    phone: app.phone,
+    country: app.country,
+    stateRegion: app.stateRegion || null,
+    city: app.city || app.location || "",
+    proposedTitle: app.proposedTitle,
+    categoryName: app.categoryName,
+    description: app.description,
+    measuredMetric: app.measuredMetric || "",
+    knownBenchmark: app.knownBenchmark || null,
+    significance: app.significance || "",
+    proposedDate: app.proposedDate || null,
+    location: app.location,
+    expectedParticipants: app.expectedParticipants ?? 1,
+    attemptType: app.attemptType || "Individual",
+    evidencePlan: app.evidencePlan || "[]",
+    additionalNotes: app.additionalNotes || null,
+    status: app.status,
+    assignedReviewerId: app.assignedReviewerId || null,
+    internalNotes: app.internalNotes || null,
+    guidelinesDocument: app.guidelinesDocument || null,
+    createdAt: app.createdAt,
+    updatedAt: app.updatedAt,
+    evidences,
+    evidenceFiles: evidences,
+    statusHistory: app.statusHistory || [],
+    certificate: cert || null,
+    // Compatibility fields for legacy views
+    applicantEmail: app.email,
+    applicantPhone: app.phone,
+    category: app.categoryName,
+    achievementTitle: app.proposedTitle,
+    place: app.location,
+    address: [app.city, app.stateRegion, app.country].filter(Boolean).join(", ") || app.location,
+    supportingDetails: app.significance || app.knownBenchmark || null,
+    rejectionReason: lastRejection?.note || null,
+    requestedInfo: lastRequested?.note || null,
+  };
+}
+
 export class ApplicationService {
   /**
    * Generates a unique sequential application number.
-   * Format: APP-YYYY-XXXXXX (e.g. APP-2026-000001)
+   * Format: WBRE-APP-YYYY-XXXXXX
    */
   public static async generateApplicationNumber(): Promise<string> {
     const year = new Date().getFullYear();
-    const prefix = `APP-${year}-`;
+    const prefix = `WBRE-APP-${year}-`;
 
     const count = await db.application.count({
       where: {
-        applicationNumber: {
-          startsWith: prefix,
-        },
+        OR: [
+          { applicationNumber: { startsWith: prefix } },
+          { applicationNumber: { startsWith: `APP-${year}-` } },
+        ],
       },
     });
 
@@ -38,41 +112,67 @@ export class ApplicationService {
 
   /**
    * Submits a new application with optional evidence files.
-   * Public submission workflow - preserved exactly as designed.
+   * Public submission workflow against the production database schema.
    */
   public static async submitApplication(
     data: ApplicationSubmissionInput,
     evidenceFiles: CreateEvidenceFileInput[] = [],
     ipAddress?: string
-  ) {
+  ): Promise<ApplicationDetail> {
     const applicationNumber = await this.generateApplicationNumber();
+    const place = data.place || data.country;
+    const addressParts = (data.address || "").split(",").map((s) => s.trim());
+    const city = addressParts[0] || place;
+    const stateRegion = addressParts.slice(1).join(", ") || null;
 
     const application = await db.application.create({
       data: {
         applicationNumber,
+        applicantType: "Individual",
         applicantName: data.fullName,
-        applicantEmail: data.email,
-        applicantPhone: data.phone,
+        email: data.email,
+        phone: data.phone,
         country: data.country,
-        address: data.address,
-        category: data.category,
-        achievementTitle: data.achievementTitle,
+        stateRegion,
+        city,
+        proposedTitle: data.achievementTitle,
+        categoryName: data.category,
         description: data.description,
-        place: data.place,
-        supportingDetails: data.supportingDetails || null,
-        status: ApplicationStatus.PENDING,
-        evidenceFiles: {
+        measuredMetric: data.achievementTitle,
+        knownBenchmark: data.supportingDetails || null,
+        significance: data.supportingDetails || data.description.slice(0, 300),
+        location: place,
+        expectedParticipants: 1,
+        attemptType: "Individual",
+        evidencePlan: JSON.stringify(evidenceFiles.map((f) => f.originalName)),
+        additionalNotes: data.supportingDetails || null,
+        status: "SUBMITTED",
+        evidences: {
           create: evidenceFiles.map((file) => ({
             fileName: file.fileName,
             originalName: file.originalName,
             fileUrl: file.fileUrl,
             fileType: file.fileType,
             fileSize: file.fileSize,
+            storageProvider: "LOCAL",
+            evidenceCategory: "GENERAL",
+            uploadedBy: "APPLICANT",
+            status: "PENDING",
           })),
+        },
+        statusHistory: {
+          create: [
+            {
+              status: "SUBMITTED",
+              note: `Application submitted by ${data.fullName}`,
+              updatedBy: "PUBLIC_APPLICANT",
+            },
+          ],
         },
       },
       include: {
-        evidenceFiles: true,
+        evidences: true,
+        statusHistory: true,
       },
     });
 
@@ -83,39 +183,93 @@ export class ApplicationService {
       ipAddress: ipAddress || null,
     });
 
-    return application;
+    return toApplicationDetail(application);
   }
 
   /**
-   * Get application by ID with all evidence and certificate details.
+   * Get application by ID with evidence, status history, and certificate.
    */
-  public static async getApplicationById(id: string) {
-    return await db.application.findUnique({
+  public static async getApplicationById(id: string): Promise<ApplicationDetail | null> {
+    const app = await db.application.findUnique({
       where: { id },
       include: {
-        evidenceFiles: {
+        evidences: {
           orderBy: { createdAt: "desc" },
         },
-        certificate: true,
-        auditLogs: {
-          orderBy: { timestamp: "desc" },
-          take: 20,
+        statusHistory: {
+          orderBy: { createdAt: "desc" },
         },
       },
     });
+
+    if (!app) return null;
+
+    // Locate related certificate if one was issued
+    const cert = await db.certificate.findFirst({
+      where: {
+        OR: [
+          { recordTitle: app.proposedTitle, recipientName: app.applicantName },
+          { record: { title: app.proposedTitle } },
+        ],
+      },
+      include: {
+        record: {
+          include: {
+            category: true,
+          },
+        },
+      },
+    });
+
+    let certSummary: CertificateSummary | null = null;
+    if (cert) {
+      certSummary = {
+        id: cert.id,
+        certificateNumber: cert.certificateNumber,
+        recordId: cert.record?.recordId || cert.recordId,
+        recipientName: cert.recipientName,
+        recordTitle: cert.recordTitle,
+        achievementResult: cert.achievementResult,
+        achievementDate: cert.achievementDate,
+        issueDate: cert.issueDate,
+        location: cert.location,
+        verificationCode: cert.verificationCode,
+        qrCodeDataUrl: cert.qrCodeDataUrl,
+        status: cert.status,
+        createdAt: cert.createdAt,
+        updatedAt: cert.updatedAt,
+        category: cert.record?.category?.name || app.categoryName,
+        achievementTitle: cert.recordTitle,
+        place: cert.location,
+        pdfUrl: `/api/certificates/${cert.id}/download`,
+        certificatePdfUrl: `/api/certificates/${cert.id}/download`,
+        verificationStatus: cert.status === "ACTIVE" ? "VALID" : cert.status,
+        verificationUrl: `/verify?code=${cert.verificationCode}`,
+        qrCodeUrl: cert.qrCodeDataUrl,
+        generatedAt: cert.issueDate,
+      };
+    }
+
+    return toApplicationDetail(app, certSummary);
   }
 
   /**
-   * Get application by Application Number (e.g. APP-2026-000001)
+   * Get application by Application Number (e.g. WBRE-APP-2026-000001 or APP-2026-000001)
    */
-  public static async getApplicationByNumber(applicationNumber: string) {
-    return await db.application.findUnique({
+  public static async getApplicationByNumber(
+    applicationNumber: string
+  ): Promise<ApplicationDetail | null> {
+    const app = await db.application.findUnique({
       where: { applicationNumber },
       include: {
-        evidenceFiles: true,
-        certificate: true,
+        evidences: true,
+        statusHistory: true,
       },
     });
+
+    if (!app) return null;
+
+    return toApplicationDetail(app);
   }
 
   /**
@@ -141,11 +295,27 @@ export class ApplicationService {
     const take = pageSize;
 
     const where: any = {};
-    if (status) where.status = status;
-    if (category) where.category = category;
+
+    if (status) {
+      if (status === "PENDING" || status === "SUBMITTED") {
+        where.status = { in: ["SUBMITTED", "PENDING"] };
+      } else if (status === "UNDER_REVIEW" || status === "UNDER_INITIAL_REVIEW") {
+        where.status = { in: ["UNDER_INITIAL_REVIEW", "UNDER_REVIEW", "UNDER_VERIFICATION"] };
+      } else if (status === "APPROVED" || status === "CERTIFICATE_GENERATED") {
+        where.status = { in: ["APPROVED", "CERTIFICATE_GENERATED"] };
+      } else {
+        where.status = status;
+      }
+    }
+
+    if (category) {
+      where.categoryName = { contains: category, mode: "insensitive" };
+    }
+
     if (country) {
       where.country = { contains: country, mode: "insensitive" };
     }
+
     if (dateFrom || dateTo) {
       where.createdAt = {};
       if (dateFrom) {
@@ -157,14 +327,16 @@ export class ApplicationService {
         where.createdAt.lte = to;
       }
     }
+
     if (search) {
       where.OR = [
         { applicationNumber: { contains: search, mode: "insensitive" } },
         { applicantName: { contains: search, mode: "insensitive" } },
-        { applicantEmail: { contains: search, mode: "insensitive" } },
-        { achievementTitle: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+        { proposedTitle: { contains: search, mode: "insensitive" } },
         { country: { contains: search, mode: "insensitive" } },
-        { place: { contains: search, mode: "insensitive" } },
+        { location: { contains: search, mode: "insensitive" } },
+        { city: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -175,15 +347,22 @@ export class ApplicationService {
         skip,
         take,
         include: {
-          evidenceFiles: { select: { id: true, fileType: true, fileSize: true, originalName: true } },
-          certificate: { select: { id: true, recordId: true, certificateNumber: true } },
+          evidences: {
+            select: { id: true, fileType: true, fileSize: true, originalName: true, status: true },
+          },
+          statusHistory: {
+            orderBy: { createdAt: "desc" },
+            take: 3,
+          },
         },
       }),
       db.application.count({ where }),
     ]);
 
+    const mappedItems: ApplicationDetail[] = items.map((item) => toApplicationDetail(item));
+
     return {
-      items,
+      items: mappedItems,
       total,
       page,
       pageSize,
@@ -193,8 +372,7 @@ export class ApplicationService {
 
   /**
    * Secure, canonical status mutation method.
-   * Centralizes all RBAC enforcement, controlled state transitions,
-   * transactional certificate creation, and audit logging.
+   * Centralizes all RBAC enforcement, controlled state transitions, and audit logging.
    */
   public static async updateStatus(params: {
     applicationId: string;
@@ -221,41 +399,40 @@ export class ApplicationService {
       throw new Error("UNAUTHORIZED: Actor role is required for status mutations.");
     }
 
-    // Direct transition to CERTIFICATE_GENERATED by client is strictly prohibited
-    if (status === ApplicationStatus.CERTIFICATE_GENERATED) {
+    if (status === "CERTIFICATE_GENERATED") {
       throw new Error(
         "Invalid action: Certificate generation cannot be directly requested via status update. Applications must be approved first."
       );
     }
 
     // Fail-fast RBAC checks before database queries
-    if (status === ApplicationStatus.APPROVED && !canApproveApplication(actorRole)) {
+    if (status === "APPROVED" && !canApproveApplication(actorRole)) {
       throw new Error(
         "FORBIDDEN: Verification Officers are not permitted to adjudicate or approve applications."
       );
     }
 
-    if (status === ApplicationStatus.REJECTED && !canRejectApplication(actorRole)) {
+    if (status === "REJECTED" && !canRejectApplication(actorRole)) {
       throw new Error(
         "FORBIDDEN: Verification Officers are not permitted to reject applications."
       );
     }
 
-    if (status === ApplicationStatus.UNDER_REVIEW && !canStartReview(actorRole)) {
+    if (
+      (status === "UNDER_REVIEW" || status === "UNDER_INITIAL_REVIEW") &&
+      !canStartReview(actorRole)
+    ) {
       throw new Error(
         "FORBIDDEN: User does not have permission to start application review."
       );
     }
 
-    // Rejection reason validation before DB query
-    if (status === ApplicationStatus.REJECTED && (!rejectionReason || rejectionReason.trim().length === 0)) {
+    if (status === "REJECTED" && (!rejectionReason || rejectionReason.trim().length === 0)) {
       throw new Error("A rejection reason is required when rejecting an application.");
     }
 
-    // Load existing application from database
     const existing = await db.application.findUnique({
       where: { id: applicationId },
-      include: { certificate: true },
     });
 
     if (!existing) {
@@ -265,37 +442,38 @@ export class ApplicationService {
     // ==========================================
     // 1. APPROVAL WORKFLOW
     // ==========================================
-    if (status === ApplicationStatus.APPROVED) {
-
-      // Transition guard: Cannot approve already rejected or certified applications
-      if (existing.status === ApplicationStatus.REJECTED) {
+    if (status === "APPROVED") {
+      if (existing.status === "REJECTED") {
         throw new Error("Invalid transition: Cannot approve an application that has already been rejected.");
       }
-      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
-        throw new Error("Invalid transition: An official certificate has already been issued for this record.");
-      }
 
-      // Validate required application information
       if (
         !existing.applicantName?.trim() ||
-        !existing.category?.trim() ||
-        !existing.achievementTitle?.trim() ||
+        !existing.categoryName?.trim() ||
+        !existing.proposedTitle?.trim() ||
         !existing.description?.trim() ||
-        !existing.place?.trim()
+        !existing.location?.trim()
       ) {
         throw new Error("Invalid application: Required applicant or achievement information is missing for approval.");
       }
 
-      // Update application status to APPROVED (Certificate generation will occur in Step 4)
       const updated = await db.application.update({
         where: { id: applicationId },
         data: {
-          status: ApplicationStatus.APPROVED,
+          status: "APPROVED",
           ...(internalNotes !== undefined && { internalNotes }),
         },
       });
 
-      // Record audit log: APPLICATION_APPROVED
+      await db.applicationStatusHistory.create({
+        data: {
+          applicationId,
+          status: "APPROVED",
+          note: internalNotes || "Application approved. Awaiting certificate generation.",
+          updatedBy: actorUserId || String(actorRole),
+        },
+      });
+
       await recordAuditLog({
         userId: actorUserId || null,
         applicationId: existing.id,
@@ -303,37 +481,31 @@ export class ApplicationService {
         details: `Application ${existing.applicationNumber} approved by ${actorRole}. Awaiting certificate generation.`,
       });
 
-      return updated;
+      return toApplicationDetail(updated);
     }
 
     // ==========================================
     // 2. REJECTION WORKFLOW
     // ==========================================
-    if (status === ApplicationStatus.REJECTED) {
-      // RBAC: Only SUPER_ADMIN and ADMIN can reject applications
-      if (!canRejectApplication(actorRole)) {
-        throw new Error(
-          "FORBIDDEN: Verification Officers are not permitted to reject applications."
-        );
-      }
-
+    if (status === "REJECTED") {
       if (!rejectionReason || rejectionReason.trim().length === 0) {
         throw new Error("A rejection reason is required when rejecting an application.");
-      }
-
-      // Transition guard: Cannot reject an application with an active certificate
-      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
-        throw new Error(
-          "Invalid transition: Cannot reject an application that has an active certificate issued."
-        );
       }
 
       const updated = await db.application.update({
         where: { id: applicationId },
         data: {
-          status: ApplicationStatus.REJECTED,
-          rejectionReason: rejectionReason.trim(),
+          status: "REJECTED",
           ...(internalNotes !== undefined && { internalNotes }),
+        },
+      });
+
+      await db.applicationStatusHistory.create({
+        data: {
+          applicationId,
+          status: "REJECTED",
+          note: rejectionReason.trim(),
+          updatedBy: actorUserId || String(actorRole),
         },
       });
 
@@ -344,36 +516,36 @@ export class ApplicationService {
         details: `Reason: ${rejectionReason.trim()}`,
       });
 
-      return updated;
+      return toApplicationDetail(updated);
     }
 
     // ==========================================
     // 3. UNDER REVIEW WORKFLOW
     // ==========================================
-    if (status === ApplicationStatus.UNDER_REVIEW) {
-      if (!canStartReview(actorRole)) {
-        throw new Error(
-          "FORBIDDEN: User does not have permission to start application review."
-        );
-      }
-
-      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
-        throw new Error(
-          "Invalid transition: Cannot put an application with an issued certificate back into review."
-        );
-      }
-      if (existing.status === ApplicationStatus.REJECTED) {
+    if (status === "UNDER_REVIEW" || status === "UNDER_INITIAL_REVIEW") {
+      if (existing.status === "REJECTED") {
         throw new Error(
           "Invalid transition: Cannot move a rejected application back into review directly."
         );
       }
 
+      const dbStatus = "UNDER_INITIAL_REVIEW";
       const updated = await db.application.update({
         where: { id: applicationId },
         data: {
-          status: ApplicationStatus.UNDER_REVIEW,
+          status: dbStatus,
           ...(internalNotes !== undefined && { internalNotes }),
-          ...(requestedInfo !== undefined && { requestedInfo }),
+        },
+      });
+
+      await db.applicationStatusHistory.create({
+        data: {
+          applicationId,
+          status: dbStatus,
+          note: requestedInfo
+            ? `Requested Info: ${requestedInfo}`
+            : `Review started by ${actorRole}`,
+          updatedBy: actorUserId || String(actorRole),
         },
       });
 
@@ -386,28 +558,31 @@ export class ApplicationService {
           : `Review started by ${actorRole}`,
       });
 
-      return updated;
+      return toApplicationDetail(updated);
     }
 
     // ==========================================
-    // 4. RESET TO PENDING (SUPER_ADMIN ONLY)
+    // 4. RESET TO PENDING / SUBMITTED (ADMIN ONLY)
     // ==========================================
-    if (status === ApplicationStatus.PENDING) {
+    if (status === "PENDING" || status === "SUBMITTED") {
       if (actorRole !== Role.SUPER_ADMIN && actorRole !== Role.ADMIN) {
-        throw new Error("FORBIDDEN: Only administrators can reset application status to PENDING.");
-      }
-
-      if (existing.status === ApplicationStatus.CERTIFICATE_GENERATED || existing.certificate) {
-        throw new Error(
-          "Invalid transition: Cannot reset an application with an issued certificate to PENDING."
-        );
+        throw new Error("FORBIDDEN: Only administrators can reset application status to SUBMITTED.");
       }
 
       const updated = await db.application.update({
         where: { id: applicationId },
         data: {
-          status: ApplicationStatus.PENDING,
+          status: "SUBMITTED",
           ...(internalNotes !== undefined && { internalNotes }),
+        },
+      });
+
+      await db.applicationStatusHistory.create({
+        data: {
+          applicationId,
+          status: "SUBMITTED",
+          note: `Application status reset to SUBMITTED by ${actorRole}`,
+          updatedBy: actorUserId || String(actorRole),
         },
       });
 
@@ -415,10 +590,10 @@ export class ApplicationService {
         userId: actorUserId || null,
         applicationId,
         action: "STATUS_CHANGED_TO_PENDING",
-        details: `Application status reset to PENDING by ${actorRole}`,
+        details: `Application status reset to SUBMITTED by ${actorRole}`,
       });
 
-      return updated;
+      return toApplicationDetail(updated);
     }
 
     throw new Error(`Unsupported status transition to ${status}`);
@@ -452,7 +627,7 @@ export class ApplicationService {
       details: `Internal notes updated by ${actorRole || "staff"} (${notes.length} characters)`,
     });
 
-    return updated;
+    return toApplicationDetail(updated);
   }
 
   /**
@@ -471,8 +646,10 @@ export class ApplicationService {
       recentAuditLogs,
     ] = await Promise.all([
       db.application.count(),
-      db.application.count({ where: { status: "PENDING" } }),
-      db.application.count({ where: { status: "UNDER_REVIEW" } }),
+      db.application.count({ where: { status: { in: ["SUBMITTED", "PENDING"] } } }),
+      db.application.count({
+        where: { status: { in: ["UNDER_INITIAL_REVIEW", "UNDER_REVIEW", "UNDER_VERIFICATION"] } },
+      }),
       db.certificate.count(),
       db.application.count({ where: { status: "REJECTED" } }),
       db.application.count({ where: { status: { in: ["APPROVED", "CERTIFICATE_GENERATED"] } } }),
@@ -480,22 +657,72 @@ export class ApplicationService {
         orderBy: { createdAt: "desc" },
         take: 6,
         include: {
-          certificate: { select: { recordId: true } },
+          evidences: true,
+          statusHistory: true,
         },
       }),
       db.certificate.findMany({
-        orderBy: { generatedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         take: 5,
+        include: {
+          record: {
+            include: {
+              category: true,
+            },
+          },
+        },
       }),
       db.auditLog.findMany({
-        orderBy: { timestamp: "desc" },
+        orderBy: { createdAt: "desc" },
         take: 8,
         include: {
           user: { select: { name: true, email: true } },
-          application: { select: { applicationNumber: true, applicantName: true } },
         },
       }),
     ]);
+
+    const mappedRecentApps = recentApplications.map((app) => toApplicationDetail(app));
+    const mappedRecentCerts: CertificateSummary[] = recentCertificates.map((cert) => ({
+      id: cert.id,
+      certificateNumber: cert.certificateNumber,
+      recordId: cert.record?.recordId || cert.recordId,
+      recipientName: cert.recipientName,
+      recordTitle: cert.recordTitle,
+      achievementResult: cert.achievementResult,
+      achievementDate: cert.achievementDate,
+      issueDate: cert.issueDate,
+      location: cert.location,
+      verificationCode: cert.verificationCode,
+      qrCodeDataUrl: cert.qrCodeDataUrl,
+      status: cert.status,
+      createdAt: cert.createdAt,
+      updatedAt: cert.updatedAt,
+      category: cert.record?.category?.name || "General",
+      achievementTitle: cert.recordTitle,
+      place: cert.location,
+      pdfUrl: `/api/certificates/${cert.id}/download`,
+      certificatePdfUrl: `/api/certificates/${cert.id}/download`,
+      verificationStatus: cert.status === "ACTIVE" ? "VALID" : cert.status,
+      verificationUrl: `/verify?code=${cert.verificationCode}`,
+      qrCodeUrl: cert.qrCodeDataUrl,
+      generatedAt: cert.issueDate,
+    }));
+
+    const mappedAuditLogs = recentAuditLogs.map((log) => ({
+      id: log.id,
+      userId: log.userId,
+      action: log.action,
+      entity: log.entity,
+      entityId: log.entityId,
+      details: log.details,
+      ipAddress: log.ipAddress,
+      timestamp: log.createdAt,
+      createdAt: log.createdAt,
+      user: log.user,
+      application: log.entityId
+        ? { applicationNumber: log.entityId, applicantName: "" }
+        : null,
+    }));
 
     const pendingReview = pendingRequests + underReviewRequests;
     const approved = approvedRequests;
@@ -511,9 +738,9 @@ export class ApplicationService {
       underReviewRequests,
       approvedCertificates: certificatesIssued,
       rejectedRequests,
-      recentApplications,
-      recentCertificates,
-      recentAuditLogs,
+      recentApplications: mappedRecentApps,
+      recentCertificates: mappedRecentCerts,
+      recentAuditLogs: mappedAuditLogs,
     };
   }
 }

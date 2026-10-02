@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 import {
   AUTH_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,

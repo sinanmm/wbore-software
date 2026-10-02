@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 
 export const AUTH_COOKIE_NAME = "wbre_admin_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24; // 24 hours

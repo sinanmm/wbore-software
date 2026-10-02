@@ -3,7 +3,7 @@ import { certificateTemplate } from "@/config/certificate-template";
 import { Settings, Sliders, Database, HardDrive, Cpu, ShieldCheck } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 
 export const dynamic = "force-dynamic";
 

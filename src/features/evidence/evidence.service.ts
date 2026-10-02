@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
 import { recordAuditLog } from "@/lib/audit";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 import { canUploadEvidence, canRemoveEvidence, canDownloadEvidence } from "@/lib/rbac";
 import {
   validateEvidenceFile,
@@ -44,7 +44,7 @@ export class EvidenceService {
    * Retrieves all evidence files associated with an application.
    */
   public static async getEvidenceForApplication(applicationId: string) {
-    return await db.evidenceFile.findMany({
+    return await db.applicationEvidence.findMany({
       where: { applicationId },
       orderBy: { createdAt: "desc" },
     });
@@ -74,7 +74,7 @@ export class EvidenceService {
     // 2. Validate Application exists
     const application = await db.application.findUnique({
       where: { id: applicationId },
-      include: { evidenceFiles: true },
+      include: { evidences: true },
     });
 
     if (!application) {
@@ -82,11 +82,11 @@ export class EvidenceService {
     }
 
     // 3. File Count & Total Size Limit Check
-    if (application.evidenceFiles.length >= MAX_FILE_COUNT) {
+    if (application.evidences.length >= MAX_FILE_COUNT) {
       throw new Error(`Maximum file count reached (${MAX_FILE_COUNT} files limit).`);
     }
 
-    const currentTotalSize = application.evidenceFiles.reduce((acc, f) => acc + f.fileSize, 0);
+    const currentTotalSize = application.evidences.reduce((acc, f) => acc + f.fileSize, 0);
     if (currentTotalSize + fileBuffer.length > MAX_TOTAL_EVIDENCE_SIZE_BYTES) {
       throw new Error(`Total evidence files size exceeds the ${MAX_TOTAL_SIZE_MB}MB limit for this application.`);
     }
@@ -109,7 +109,7 @@ export class EvidenceService {
 
     // 6. Insert database record with failure cleanup
     try {
-      const evidence = await db.evidenceFile.create({
+      const evidence = await db.applicationEvidence.create({
         data: {
           applicationId,
           fileName: uploadResult.storageKey.split("/").pop() || sanitizedName,
@@ -117,6 +117,10 @@ export class EvidenceService {
           fileUrl: uploadResult.fileUrl,
           fileType: validation.detectedMime || "application/octet-stream",
           fileSize: fileBuffer.length,
+          storageProvider: "LOCAL",
+          evidenceCategory: evidenceCategory || "GENERAL",
+          uploadedBy: "ADMIN",
+          status: "PENDING",
         },
       });
 
@@ -160,8 +164,8 @@ export class EvidenceService {
       throw new Error("A valid reason (minimum 3 characters) is required to remove evidence.");
     }
 
-    // 3. Locate EvidenceFile
-    const evidence = await db.evidenceFile.findUnique({
+    // 3. Locate ApplicationEvidence
+    const evidence = await db.applicationEvidence.findUnique({
       where: { id: evidenceId },
     });
 
@@ -170,7 +174,7 @@ export class EvidenceService {
     }
 
     // 4. Delete Database Record
-    await db.evidenceFile.delete({
+    await db.applicationEvidence.delete({
       where: { id: evidenceId },
     });
 
@@ -202,7 +206,7 @@ export class EvidenceService {
       throw new Error("FORBIDDEN: You do not have permission to download evidence.");
     }
 
-    const evidence = await db.evidenceFile.findUnique({
+    const evidence = await db.applicationEvidence.findUnique({
       where: { id: evidenceId },
     });
 
@@ -239,7 +243,7 @@ export class EvidenceService {
       throw new Error("FORBIDDEN: You do not have permission to view evidence.");
     }
 
-    const evidence = await db.evidenceFile.findUnique({
+    const evidence = await db.applicationEvidence.findUnique({
       where: { id: evidenceId },
     });
 
@@ -283,7 +287,7 @@ export class EvidenceService {
     const application = await db.application.findUnique({
       where: { id: applicationId },
       include: {
-        evidenceFiles: {
+        evidences: {
           orderBy: { createdAt: "asc" },
         },
       },
@@ -293,12 +297,12 @@ export class EvidenceService {
       throw new Error("Application not found.");
     }
 
-    if (application.evidenceFiles.length === 0) {
+    if (application.evidences.length === 0) {
       throw new Error("No evidence files attached to this application to build a dossier.");
     }
 
     // Total size check to avoid out-of-memory
-    const totalRawSize = application.evidenceFiles.reduce((acc, f) => acc + f.fileSize, 0);
+    const totalRawSize = application.evidences.reduce((acc, f) => acc + f.fileSize, 0);
     if (totalRawSize > MAX_DOSSIER_SIZE_BYTES) {
       throw new Error(
         `Total dossier size (${Math.round(
@@ -312,8 +316,8 @@ export class EvidenceService {
 
     const seenNames = new Set<string>();
 
-    for (let i = 0; i < application.evidenceFiles.length; i++) {
-      const file = application.evidenceFiles[i];
+    for (let i = 0; i < application.evidences.length; i++) {
+      const file = application.evidences[i];
       try {
         const buffer = await storage.getFile(file.fileUrl);
 
@@ -346,7 +350,7 @@ export class EvidenceService {
       userId: actor.userId,
       applicationId,
       action: "EVIDENCE_DOSSIER_DOWNLOADED",
-      details: `Generated and downloaded complete evidence dossier (${application.evidenceFiles.length} files, ${Math.round(
+      details: `Generated and downloaded complete evidence dossier (${application.evidences.length} files, ${Math.round(
         zipBuffer.length / 1024
       )} KB)`,
       ipAddress: ipAddress || null,
@@ -355,7 +359,7 @@ export class EvidenceService {
     return {
       zipBuffer,
       zipFilename,
-      fileCount: application.evidenceFiles.length,
+      fileCount: application.evidences.length,
     };
   }
 }

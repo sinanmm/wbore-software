@@ -2,14 +2,51 @@ import { db } from "@/lib/db";
 import { recordAuditLog } from "@/lib/audit";
 import { getCategoryCode, formatDate } from "@/lib/utils";
 import { CertificateGenerator } from "./certificate.generator";
-import { Role } from "@prisma/client";
-import { canGenerateCertificate } from "@/lib/rbac";
+import { Role, CertificateSummary } from "@/types";
+import { canGenerateCertificate, canRevokeCertificate } from "@/lib/rbac";
+
+export function toCertificateSummary(
+  cert: any,
+  record?: any,
+  application?: any
+): CertificateSummary {
+  const rec = record || cert.record;
+  const canonicalRecordId = rec?.recordId || cert.recordId;
+  const catName = rec?.category?.name || application?.categoryName || "General";
+  const isValid = cert.status === "ACTIVE";
+
+  return {
+    id: cert.id,
+    certificateNumber: cert.certificateNumber,
+    recordId: canonicalRecordId,
+    recipientName: cert.recipientName,
+    recordTitle: cert.recordTitle,
+    achievementResult: cert.achievementResult,
+    achievementDate: cert.achievementDate,
+    issueDate: cert.issueDate,
+    location: cert.location,
+    verificationCode: cert.verificationCode,
+    qrCodeDataUrl: cert.qrCodeDataUrl || null,
+    status: cert.status,
+    createdAt: cert.createdAt,
+    updatedAt: cert.updatedAt,
+    // Compatibility fields
+    applicationId: application?.id || cert.id,
+    category: catName,
+    achievementTitle: cert.recordTitle,
+    place: cert.location,
+    pdfUrl: `/api/certificates/${cert.id}/download`,
+    certificatePdfUrl: `/api/certificates/${cert.id}/download`,
+    verificationStatus: isValid ? "VALID" : cert.status,
+    verificationUrl: `/verify?code=${cert.verificationCode}`,
+    qrCodeUrl: cert.qrCodeDataUrl || null,
+    generatedAt: cert.issueDate || cert.createdAt,
+    record: rec || null,
+    application: application || null,
+  };
+}
 
 export class CertificateService {
-  /**
-   * Generates a unique sequential Record ID: WBRE-[CATEGORY]-[YEAR]-[NUMBER]
-   * Example: WBRE-TEC-2026-000101
-   */
   /**
    * Generates a unique sequential Record ID: WBRE-[CATEGORY]-[YEAR]-[SEQUENCE]
    * Example: WBRE-TEC-2026-000101
@@ -19,7 +56,7 @@ export class CertificateService {
     const categoryCode = getCategoryCode(category);
     const prefix = `WBRE-${categoryCode}-${year}-`;
 
-    const latest = await client.certificate.findFirst({
+    const latest = await client.record.findFirst({
       where: {
         recordId: {
           startsWith: prefix,
@@ -84,73 +121,104 @@ export class CertificateService {
   }
 
   /**
-   * Generates and stores an official certificate for an approved application.
+   * Generates and stores an official certificate and record for an approved application.
    * Requires SUPER_ADMIN or ADMIN role.
-   * Enforces strict idempotency, concurrency safety, and storage-database consistency.
    */
   public static async generateCertificateForApplication(
     applicationId: string,
     adminUserId?: string,
     adminRole?: Role
-  ) {
+  ): Promise<CertificateSummary> {
     if (adminRole && !canGenerateCertificate(adminRole)) {
       throw new Error("FORBIDDEN: Verification Officers are not permitted to generate certificates.");
     }
 
-    // 1. Load application with existing certificate
+    // 1. Load application
     const application = await db.application.findUnique({
       where: { id: applicationId },
-      include: { certificate: true },
+      include: { evidences: true, statusHistory: true },
     });
 
     if (!application) {
       throw new Error("Application not found");
     }
 
-    // 2. Idempotency Check: Return existing certificate if already generated
-    if (application.certificate) {
-      return application.certificate;
-    }
-
-    // 3. Status validation: Application MUST be in APPROVED status
+    // 2. Status validation: Application MUST be in APPROVED status
     if (application.status !== "APPROVED" && application.status !== "CERTIFICATE_GENERATED") {
       throw new Error(
         `Invalid status: Cannot generate certificate for application in ${application.status} status. The application must be approved first.`
       );
     }
 
-    // 4. Generate unique tracking identifiers
-    let recordId = await this.generateRecordId(application.category);
+    // 3. Idempotency Check: Return existing certificate if already generated
+    const existingCert = await db.certificate.findFirst({
+      where: {
+        OR: [
+          { recordTitle: application.proposedTitle, recipientName: application.applicantName },
+          { record: { title: application.proposedTitle } },
+        ],
+      },
+      include: {
+        record: {
+          include: { category: true },
+        },
+      },
+    });
+
+    if (existingCert) {
+      return toCertificateSummary(existingCert, existingCert.record, application);
+    }
+
+    // 4. Ensure RecordCategory exists
+    const categoryName = application.categoryName || "General";
+    const categorySlug = categoryName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "general";
+
+    const category = await db.recordCategory.upsert({
+      where: { slug: categorySlug },
+      update: {},
+      create: {
+        name: categoryName,
+        slug: categorySlug,
+        description: `Records in ${categoryName}`,
+        iconName: "Award",
+      },
+    });
+
+    // 5. Generate unique tracking identifiers
+    let recordId = await this.generateRecordId(categoryName);
     let certificateNumber = await this.generateCertificateNumber();
 
     // Verify uniqueness against existing database records
     let attempts = 0;
     while (attempts < 5) {
-      const [existingRecord, existingCert] = await Promise.all([
-        db.certificate.findUnique({ where: { recordId } }),
+      const [existingRecord, existingCertCheck] = await Promise.all([
+        db.record.findUnique({ where: { recordId } }),
         db.certificate.findUnique({ where: { certificateNumber } }),
       ]);
 
-      if (!existingRecord && !existingCert) break;
+      if (!existingRecord && !existingCertCheck) break;
 
       attempts++;
       const offset = attempts;
       const year = new Date().getFullYear();
-      const catCode = getCategoryCode(application.category);
+      const catCode = getCategoryCode(categoryName);
       recordId = `WBRE-${catCode}-${year}-${String(101 + offset).padStart(6, "0")}`;
       certificateNumber = `WBRE-CERT-${year}-${String(101 + offset).padStart(6, "0")}`;
     }
 
-    const dateFormatted = formatDate(new Date());
+    const dateFormatted = formatDate(application.proposedDate || new Date());
 
-    // 5. Generate high-resolution PDF and store via StorageAdapter
+    // 6. Generate high-resolution PDF
     let generatedResult;
     try {
       generatedResult = await CertificateGenerator.generate({
         recipientName: application.applicantName,
-        category: application.category,
-        achievementTitle: application.achievementTitle,
-        place: application.place,
+        category: categoryName,
+        achievementTitle: application.proposedTitle,
+        place: application.location,
         recordId,
         certificateNumber,
         dateOfRecognition: dateFormatted,
@@ -159,79 +227,91 @@ export class CertificateService {
       throw new Error(`Certificate PDF generation failed: ${genErr.message}`);
     }
 
-    const { pdfUrl, storageKey, qrCodeDataUrl, verificationUrl } = generatedResult;
+    const { qrCodeDataUrl } = generatedResult;
+    const recordSlug = `${application.proposedTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")}-${recordId.toLowerCase()}`;
+    const verificationCode = `VER-${certificateNumber.replace(/[^A-Z0-9]/g, "")}`;
 
-    // 6. Persist to database atomically with rollback of storage on failure
-    try {
-      const certificate = await db.$transaction(async (tx) => {
-        // Double-check inside transaction to prevent race conditions
-        const existingTxCert = await tx.certificate.findUnique({
-          where: { applicationId: application.id },
-        });
-
-        if (existingTxCert) {
-          return existingTxCert;
-        }
-
-        const createdCert = await tx.certificate.create({
-          data: {
-            applicationId: application.id,
-            recordId,
-            certificateNumber,
-            recipientName: application.applicantName,
-            category: application.category,
-            achievementTitle: application.achievementTitle,
-            place: application.place,
-            issueDate: new Date(),
-            pdfUrl,
-            certificatePdfUrl: pdfUrl,
-            verificationStatus: "VALID",
-            qrCodeUrl: qrCodeDataUrl,
-            verificationUrl,
-          },
-        });
-
-        await tx.application.update({
-          where: { id: applicationId },
-          data: {
-            status: "CERTIFICATE_GENERATED",
-          },
-        });
-
-        await tx.auditLog.create({
-          data: {
-            userId: adminUserId || null,
-            applicationId: application.id,
-            action: "CERTIFICATE_GENERATED",
-            details: `Generated Certificate ${certificateNumber} with Record ID ${recordId} for ${application.applicantName}`,
-          },
-        });
-
-        return createdCert;
+    // 7. Persist Record, Certificate, and History atomically
+    const result = await db.$transaction(async (tx) => {
+      const record = await tx.record.create({
+        data: {
+          recordId,
+          slug: recordSlug,
+          title: application.proposedTitle,
+          shortDescription: application.description.slice(0, 200),
+          fullDescription: application.description,
+          resultValue: application.measuredMetric || "Verified",
+          measurementUnit: application.measuredMetric || "Standard",
+          recordDate: application.proposedDate || new Date(),
+          verificationDate: new Date(),
+          country: application.country,
+          location: application.location,
+          status: "ACTIVE",
+          categoryId: category.id,
+          certificateNumber,
+        },
+        include: { category: true },
       });
 
-      return certificate;
-    } catch (dbErr: any) {
-      // Storage consistency cleanup: Remove uploaded PDF if database transaction failed
-      try {
-        const { storage } = await import("@/lib/storage");
-        await storage.deleteFile(storageKey || pdfUrl);
-      } catch (cleanupErr) {
-        console.warn("Storage rollback cleanup warning:", cleanupErr);
-      }
+      const certificate = await tx.certificate.create({
+        data: {
+          certificateNumber,
+          recordId: record.id,
+          recipientName: application.applicantName,
+          recordTitle: application.proposedTitle,
+          achievementResult: application.measuredMetric || "Verified",
+          achievementDate: application.proposedDate || new Date(),
+          issueDate: new Date(),
+          location: application.location,
+          verificationCode,
+          qrCodeDataUrl,
+          status: "ACTIVE",
+        },
+      });
 
-      // Check if failure was due to duplicate concurrent insertion
-      if (dbErr.code === "P2002") {
-        const concurrentCert = await db.certificate.findUnique({
-          where: { applicationId },
-        });
-        if (concurrentCert) {
-          return concurrentCert;
-        }
-      }
+      await tx.recordHistory.create({
+        data: {
+          recordId: record.id,
+          eventDate: new Date(),
+          eventType: "ESTABLISHED",
+          title: "Record Established",
+          description: `Official Certificate ${certificateNumber} issued to ${application.applicantName}`,
+        },
+      });
 
-      throw new Error(`Database error during certificate registration: ${dbErr.message}`);
-    }
+      await tx.application.update({
+        where: { id: applicationId },
+        data: {
+          status: "APPROVED",
+        },
+      });
+
+      await tx.applicationStatusHistory.create({
+        data: {
+          applicationId,
+          status: "APPROVED",
+          note: `Certificate ${certificateNumber} generated with Record ID ${recordId}`,
+          updatedBy: adminUserId || "SYSTEM",
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: adminUserId || null,
+          action: "CERTIFICATE_GENERATED",
+          entity: "APPLICATION",
+          entityId: applicationId,
+          details: `Generated Certificate ${certificateNumber} with Record ID ${recordId} for ${application.applicantName}`,
+        },
+      });
+
+      return { certificate, record };
+    });
+
+    return toCertificateSummary(result.certificate, result.record, application);
   }
 
   /**
@@ -240,8 +320,8 @@ export class CertificateService {
   public static async getCertificateCounts() {
     const [total, valid, revoked] = await Promise.all([
       db.certificate.count(),
-      db.certificate.count({ where: { verificationStatus: "VALID" } }),
-      db.certificate.count({ where: { verificationStatus: "REVOKED" } }),
+      db.certificate.count({ where: { status: "ACTIVE" } }),
+      db.certificate.count({ where: { status: "REVOKED" } }),
     ]);
 
     return { total, valid, revoked };
@@ -265,28 +345,26 @@ export class CertificateService {
 
     const where: any = {};
 
-    // Search filter across Record ID, Certificate Number, Recipient Name, Achievement Title
     if (params.search && params.search.trim()) {
       const q = params.search.trim();
       where.OR = [
-        { recordId: { contains: q, mode: "insensitive" } },
         { certificateNumber: { contains: q, mode: "insensitive" } },
         { recipientName: { contains: q, mode: "insensitive" } },
-        { achievementTitle: { contains: q, mode: "insensitive" } },
+        { recordTitle: { contains: q, mode: "insensitive" } },
+        { record: { recordId: { contains: q, mode: "insensitive" } } },
       ];
     }
 
-    // Status filter
     if (params.status && params.status !== "ALL") {
-      where.verificationStatus = params.status;
+      where.status = params.status === "VALID" ? "ACTIVE" : params.status;
     }
 
-    // Category filter
     if (params.category && params.category.trim() && params.category !== "ALL") {
-      where.category = { contains: params.category.trim(), mode: "insensitive" };
+      where.record = {
+        category: { name: { contains: params.category.trim(), mode: "insensitive" } },
+      };
     }
 
-    // Date range filter on issueDate
     if (params.dateFrom || params.dateTo) {
       where.issueDate = {};
       if (params.dateFrom) {
@@ -308,16 +386,13 @@ export class CertificateService {
       db.certificate.count({ where }),
       db.certificate.findMany({
         where,
-        orderBy: { generatedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
         include: {
-          application: {
-            select: {
-              id: true,
-              applicationNumber: true,
-              applicantEmail: true,
-              country: true,
+          record: {
+            include: {
+              category: true,
             },
           },
         },
@@ -326,9 +401,12 @@ export class CertificateService {
     ]);
 
     const totalPages = Math.ceil(total / limit) || 1;
+    const mappedCerts: CertificateSummary[] = certificates.map((c) =>
+      toCertificateSummary(c, c.record)
+    );
 
     return {
-      certificates,
+      certificates: mappedCerts,
       pagination: {
         page,
         limit,
@@ -349,27 +427,15 @@ export class CertificateService {
       where: {
         OR: [
           { id: cleanId },
-          { recordId: { equals: cleanId, mode: "insensitive" } },
           { certificateNumber: { equals: cleanId, mode: "insensitive" } },
+          { verificationCode: { equals: cleanId, mode: "insensitive" } },
+          { record: { recordId: { equals: cleanId, mode: "insensitive" } } },
         ],
       },
       include: {
-        application: {
-          select: {
-            id: true,
-            applicationNumber: true,
-            applicantName: true,
-            applicantEmail: true,
-            applicantPhone: true,
-            country: true,
-            address: true,
+        record: {
+          include: {
             category: true,
-            achievementTitle: true,
-            description: true,
-            place: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
           },
         },
       },
@@ -380,10 +446,10 @@ export class CertificateService {
     // Load related audit logs for certificate lifecycle
     const auditLogs = await db.auditLog.findMany({
       where: {
-        applicationId: cert.applicationId,
-        action: {
-          in: ["CERTIFICATE_GENERATED", "CERTIFICATE_REVOKED", "CERTIFICATE_VERIFIED"],
-        },
+        OR: [
+          { entityId: cert.id },
+          { entityId: cert.record?.id },
+        ],
       },
       orderBy: { createdAt: "desc" },
       take: 20,
@@ -399,25 +465,32 @@ export class CertificateService {
       },
     });
 
+    // Locate related application if available
+    const app = await db.application.findFirst({
+      where: {
+        OR: [
+          { proposedTitle: cert.recordTitle, applicantName: cert.recipientName },
+          { proposedTitle: cert.record?.title },
+        ],
+      },
+    });
+
+    const certSummary = toCertificateSummary(cert, cert.record, app);
+
     return {
-      ...cert,
+      ...certSummary,
       auditLogs,
     };
   }
 
   /**
    * Revoke an existing certificate (SUPER_ADMIN or ADMIN only).
-   * Strictly validates mandatory non-empty reason.
-   * Returns idempotent response if already revoked.
-   * Does NOT modify the historical PDF file in storage.
    */
   public static async revokeCertificate(params: {
     certificateId: string;
     reason: string;
     actor: { userId: string; role: Role };
   }) {
-    const { canRevokeCertificate } = await import("@/lib/rbac");
-
     if (!canRevokeCertificate(params.actor.role)) {
       throw new Error("FORBIDDEN: Verification Officers are not permitted to revoke certificates.");
     }
@@ -433,9 +506,12 @@ export class CertificateService {
       where: {
         OR: [
           { id: cleanId },
-          { recordId: { equals: cleanId, mode: "insensitive" } },
           { certificateNumber: { equals: cleanId, mode: "insensitive" } },
+          { record: { recordId: { equals: cleanId, mode: "insensitive" } } },
         ],
+      },
+      include: {
+        record: true,
       },
     });
 
@@ -443,96 +519,105 @@ export class CertificateService {
       throw new Error("Certificate not found.");
     }
 
-    // Idempotency check: If already revoked, return without creating duplicate events
-    if (cert.verificationStatus === "REVOKED") {
+    if (cert.status === "REVOKED") {
       return {
-        certificate: cert,
+        certificate: toCertificateSummary(cert, cert.record),
         alreadyRevoked: true,
-        message: `Certificate ${cert.certificateNumber} (${cert.recordId}) is already revoked.`,
+        message: `Certificate ${cert.certificateNumber} is already revoked.`,
       };
     }
 
-    const updated = await db.certificate.update({
-      where: { id: cert.id },
-      data: {
-        verificationStatus: "REVOKED",
-      },
-    });
+    const updated = await db.$transaction(async (tx) => {
+      const c = await tx.certificate.update({
+        where: { id: cert.id },
+        data: { status: "REVOKED" },
+        include: { record: true },
+      });
 
-    const auditPayload = {
-      certificateId: cert.id,
-      applicationId: cert.applicationId,
-      recordId: cert.recordId,
-      certificateNumber: cert.certificateNumber,
-      reason: cleanReason,
-      actorUserId: params.actor.userId,
-      actorRole: params.actor.role,
-      timestamp: new Date().toISOString(),
-    };
+      if (cert.recordId) {
+        await tx.record.update({
+          where: { id: cert.recordId },
+          data: { status: "REVOKED" },
+        });
 
-    await recordAuditLog({
-      userId: params.actor.userId,
-      applicationId: cert.applicationId,
-      action: "CERTIFICATE_REVOKED",
-      details: JSON.stringify(auditPayload),
+        await tx.recordHistory.create({
+          data: {
+            recordId: cert.recordId,
+            eventDate: new Date(),
+            eventType: "REVOKED",
+            title: "Certificate Revoked",
+            description: cleanReason,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: params.actor.userId,
+          entity: "CERTIFICATE",
+          entityId: cert.id,
+          action: "CERTIFICATE_REVOKED",
+          details: cleanReason,
+        },
+      });
+
+      return c;
     });
 
     return {
-      certificate: updated,
+      certificate: toCertificateSummary(updated, updated.record),
       alreadyRevoked: false,
-      message: `Certificate ${cert.certificateNumber} (${cert.recordId}) revoked successfully.`,
+      message: `Certificate ${cert.certificateNumber} revoked successfully.`,
     };
   }
 
   /**
    * Look up certificate by Record ID or Certificate Number
    */
-  public static async findByRecordOrCertNumber(identifier: string) {
-    const cleanId = identifier.trim().toUpperCase();
+  public static async findByRecordOrCertNumber(
+    identifier: string
+  ): Promise<CertificateSummary | null> {
+    const cleanId = identifier.trim();
 
-    return await db.certificate.findFirst({
+    const cert = await db.certificate.findFirst({
       where: {
         OR: [
-          { recordId: { equals: cleanId, mode: "insensitive" } },
+          { id: cleanId },
           { certificateNumber: { equals: cleanId, mode: "insensitive" } },
+          { verificationCode: { equals: cleanId, mode: "insensitive" } },
+          { record: { recordId: { equals: cleanId, mode: "insensitive" } } },
         ],
       },
       include: {
-        application: {
-          select: {
-            id: true,
-            applicationNumber: true,
-            applicantName: true,
+        record: {
+          include: {
             category: true,
-            achievementTitle: true,
-            description: true,
-            place: true,
-            country: true,
-            status: true,
-            createdAt: true,
           },
         },
       },
     });
+
+    if (!cert) return null;
+
+    return toCertificateSummary(cert, cert.record);
   }
 
   /**
    * List all generated certificates
    */
-  public static async getAllCertificates(limit = 100) {
-    return await db.certificate.findMany({
-      orderBy: { generatedAt: "desc" },
+  public static async getAllCertificates(limit = 100): Promise<CertificateSummary[]> {
+    const certs = await db.certificate.findMany({
+      orderBy: { createdAt: "desc" },
       take: limit,
       include: {
-        application: {
-          select: {
-            applicationNumber: true,
-            applicantEmail: true,
-            country: true,
+        record: {
+          include: {
+            category: true,
           },
         },
       },
     });
+
+    return certs.map((c) => toCertificateSummary(c, c.record));
   }
 }
-

@@ -3,6 +3,8 @@ import { db } from "./db";
 export interface LogAuditParams {
   userId?: string | null;
   applicationId?: string | null;
+  entity?: string;
+  entityId?: string | null;
   action: string;
   details?: string | null;
   ipAddress?: string | null;
@@ -10,11 +12,15 @@ export interface LogAuditParams {
 
 export async function recordAuditLog(params: LogAuditParams) {
   try {
+    const entity = params.entity || (params.applicationId ? "APPLICATION" : "SYSTEM");
+    const entityId = params.entityId || params.applicationId || null;
+
     return await db.auditLog.create({
       data: {
         userId: params.userId || null,
-        applicationId: params.applicationId || null,
         action: params.action,
+        entity,
+        entityId,
         details: params.details || null,
         ipAddress: params.ipAddress || null,
       },

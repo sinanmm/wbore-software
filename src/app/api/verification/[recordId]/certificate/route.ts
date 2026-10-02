@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { CertificateService } from "@/features/certificates/certificate.service";
+import { CertificateGenerator } from "@/features/certificates/certificate.generator";
 import { storage } from "@/lib/storage";
+import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +17,10 @@ export async function GET(
 ) {
   try {
     const { recordId } = await params;
-    const cleanRecordId = decodeURIComponent(recordId).trim().toUpperCase();
+    const cleanRecordId = decodeURIComponent(recordId).trim();
 
     // 1. Load certificate by Record ID or Certificate Number
-    const cert = await db.certificate.findFirst({
-      where: {
-        OR: [
-          { recordId: { equals: cleanRecordId, mode: "insensitive" } },
-          { certificateNumber: { equals: cleanRecordId, mode: "insensitive" } },
-        ],
-      },
-    });
+    const cert = await CertificateService.findByRecordOrCertNumber(cleanRecordId);
 
     // 2. Verify record exists
     if (!cert) {
@@ -36,33 +31,36 @@ export async function GET(
     }
 
     // 3. Verify certificate status
-    if (cert.verificationStatus === "REVOKED") {
+    if (cert.status === "REVOKED" || cert.verificationStatus === "REVOKED") {
       return NextResponse.json(
         { error: "CERTIFICATE REVOKED. This credential is no longer active or valid." },
         { status: 410 }
       );
     }
 
-    // 4. Resolve storage key or path
-    const storagePath = cert.pdfUrl || cert.certificatePdfUrl;
-    if (!storagePath) {
-      return NextResponse.json(
-        { error: "Certificate file record unavailable." },
-        { status: 404 }
-      );
+    let pdfBuffer: Buffer | null = null;
+    const storagePath = cert.pdfUrl;
+    if (storagePath && !storagePath.startsWith("/api/")) {
+      try {
+        pdfBuffer = await storage.getFile(storagePath);
+      } catch {
+        pdfBuffer = null;
+      }
     }
 
-    // 5. Verify file exists in storage abstraction
-    const exists = await storage.exists(storagePath);
-    if (!exists) {
-      return NextResponse.json(
-        { error: "Certificate document file not found in storage repository." },
-        { status: 404 }
-      );
+    if (!pdfBuffer) {
+      const generated = await CertificateGenerator.generate({
+        recipientName: cert.recipientName,
+        category: cert.category || "General",
+        achievementTitle: cert.achievementTitle || cert.recordTitle,
+        place: cert.place || cert.location,
+        recordId: cert.recordId,
+        certificateNumber: cert.certificateNumber,
+        dateOfRecognition: formatDate(cert.achievementDate || cert.issueDate),
+      });
+      pdfBuffer = generated.pdfBuffer;
     }
 
-    // 6. Stream PDF via storage abstraction
-    const pdfBuffer = await storage.getFile(storagePath);
     const downloadFilename = `${cert.recordId}.pdf`;
 
     return new NextResponse(new Uint8Array(pdfBuffer), {

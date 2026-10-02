@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifySessionToken, AUTH_COOKIE_NAME } from "@/lib/session";
-import { Role } from "@prisma/client";
+import { Role } from "@/types";
 
 /**
  * Next.js Edge Middleware for Admin Route and Sensitive API Protection
