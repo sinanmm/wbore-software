@@ -7,108 +7,257 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  SUPER_ADMIN
-  ADMIN
-  VERIFICATION_OFFICER
-}
-
-enum ApplicationStatus {
-  PENDING
-  UNDER_REVIEW
-  APPROVED
-  REJECTED
-  CERTIFICATE_GENERATED
-}
-
 model User {
   id           String     @id @default(cuid())
-  name         String
   email        String     @unique
+  name         String
   passwordHash String
-  role         Role       @default(ADMIN)
+  role         String     @default("REVIEWER") // SUPER_ADMIN, ADMIN, REVIEWER, ADJUDICATOR, CONTENT_MANAGER
+  isActive     Boolean    @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   auditLogs    AuditLog[]
-
-  @@map("users")
 }
 
-model Application {
-  id                 String            @id @default(cuid())
-  applicationNumber  String            @unique // e.g. APP-2026-000001
-  applicantName      String
-  applicantEmail     String
-  applicantPhone     String
-  country            String
-  address            String
-  category           String            // e.g. Technology & Innovation, Sports, Arts, etc.
-  achievementTitle   String
-  description        String            @db.Text // achievementDescription
-  place              String
-  supportingDetails  String?           @db.Text
-  status             ApplicationStatus @default(PENDING)
-  internalNotes      String?           @db.Text // reviewNotes
-  rejectionReason    String?           @db.Text
-  requestedInfo      String?           @db.Text
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-
-  evidenceFiles      EvidenceFile[]
-  certificate        Certificate?
-  auditLogs          AuditLog[]
-
-  @@map("applications")
+model RecordCategory {
+  id           String    @id @default(cuid())
+  name         String    @unique
+  slug         String    @unique
+  description  String
+  iconName     String    @default("Award")
+  displayOrder Int       @default(0)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  records      Record[]
 }
 
-model EvidenceFile {
-  id            String      @id @default(cuid())
-  applicationId String
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  fileName      String
-  originalName  String
-  fileUrl       String
-  fileType      String      // MIME type (image/png, application/pdf, video/mp4, etc.)
-  fileSize      Int         // size in bytes
-  createdAt     DateTime    @default(now())
+model RecordHolder {
+  id           String    @id @default(cuid())
+  name         String
+  slug         String    @unique
+  country      String
+  bio          String?
+  photoUrl     String?
+  organization String?
+  socialLinks  String?   // JSON string
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  records      Record[]
+}
 
-  @@map("evidence_files")
+model Organization {
+  id           String    @id @default(cuid())
+  name         String
+  slug         String    @unique
+  country      String
+  website      String?
+  logoUrl      String?
+  description  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  records      Record[]
+}
+
+model Record {
+  id                  String          @id @default(cuid())
+  recordId            String          @unique // WBRE-WR-YYYY-XXXXXX
+  slug                String          @unique
+  title               String
+  shortDescription    String
+  fullDescription     String
+  resultValue         String
+  measurementUnit     String
+  recordDate          DateTime
+  verificationDate    DateTime
+  country             String
+  location            String
+  status              String          @default("ACTIVE") // ACTIVE, BROKEN, REVOKED, UNDER_REVIEW, ARCHIVED
+  isDemo              Boolean         @default(false)
+  isFeatured          Boolean         @default(false)
+  
+  // Relations
+  categoryId          String
+  category            RecordCategory  @relation(fields: [categoryId], references: [id])
+  holderId            String?
+  holder              RecordHolder?   @relation(fields: [holderId], references: [id])
+  organizationId      String?
+  organization        Organization?   @relation(fields: [organizationId], references: [id])
+  
+  // Verification & Media
+  evidenceSummary     String?
+  verificationMethod  String?
+  witnessInfo         String?
+  adjudicatorInfo     String?
+  featuredImage       String?
+  galleryJson         String?         // JSON array of image URLs
+  videoUrl            String?
+  certificateNumber   String?         @unique // WBRE-CERT-YYYY-XXXXXX
+  
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  certificates        Certificate[]
+  historyEntries      RecordHistory[]
 }
 
 model Certificate {
-  id                String      @id @default(cuid())
-  applicationId     String      @unique
-  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  recordId          String      @unique // e.g. WBRE-TEC-2026-000101
-  certificateNumber String      @unique // e.g. WBRE-CERT-2026-000101
-  recipientName     String
-  category          String
-  achievementTitle  String
-  place             String
-  issueDate         DateTime    @default(now())
-  pdfUrl            String      @default("")
-  certificatePdfUrl String      @default("")
-  verificationStatus String     @default("VALID") // VALID, REVOKED, PENDING
-  qrCodeUrl         String?     @db.Text
-  verificationUrl   String?
-  generatedAt       DateTime    @default(now())
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id                 String    @id @default(cuid())
+  certificateNumber  String    @unique // WBRE-CERT-YYYY-XXXXXX
+  recordId           String
+  record             Record    @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  recipientName      String
+  recordTitle        String
+  achievementResult  String
+  achievementDate    DateTime
+  issueDate          DateTime  @default(now())
+  location           String
+  verificationCode   String    @unique
+  qrCodeDataUrl      String?
+  status             String    @default("ACTIVE") // ACTIVE, REVOKED, REPLACED
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
 
-  @@map("certificates")
+model RecordHistory {
+  id          String   @id @default(cuid())
+  recordId    String
+  record      Record   @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  eventDate   DateTime
+  eventType   String   // ESTABLISHED, UPDATED, BROKEN, REVOKED
+  title       String
+  description String
+  createdAt   DateTime @default(now())
+}
+
+model Application {
+  id                 String                    @id @default(cuid())
+  applicationNumber  String                    @unique // WBRE-APP-YYYY-XXXXXX
+  applicantType      String                    // Individual, Team, Organization, Institution, Company, School, University, Community, Government Entity, Other
+  applicantName      String
+  organizationName   String?
+  email              String
+  phone              String
+  country            String
+  stateRegion        String?
+  city               String
+  
+  // Proposal
+  proposedTitle      String
+  categoryName       String
+  description        String
+  measuredMetric     String
+  knownBenchmark     String?
+  significance       String
+  
+  // Attempt
+  proposedDate       DateTime?
+  location           String
+  expectedParticipants Int?                  @default(1)
+  attemptType        String                    // Individual, Group, Mass Participation, Corporate, Institutional
+  
+  // Evidence
+  evidencePlan       String                    // JSON array string of planned evidence types
+  additionalNotes    String?
+  
+  // Evidence Relations
+  evidences          ApplicationEvidence[]
+  evidenceTypes      ApplicationEvidenceType[]
+  
+  // Workflow Status
+  status             String                    @default("SUBMITTED") // SUBMITTED, UNDER_INITIAL_REVIEW, GUIDELINES_ISSUED, ATTEMPT_SCHEDULED, EVIDENCE_SUBMITTED, UNDER_VERIFICATION, APPROVED, REJECTED, MORE_INFORMATION_REQUIRED
+  assignedReviewerId String?
+  internalNotes      String?
+  guidelinesDocument String?
+  
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  statusHistory      ApplicationStatusHistory[]
+}
+
+model ApplicationEvidence {
+  id               String       @id @default(cuid())
+  applicationId    String
+  application      Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fileName         String
+  originalName     String
+  fileType         String
+  fileSize         Int
+  fileUrl          String
+  storageProvider  String       @default("LOCAL")
+  evidenceCategory String       @default("GENERAL")
+  uploadedBy       String       @default("APPLICANT")
+  status           String       @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason  String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model ApplicationEvidenceType {
+  id            String       @id @default(cuid())
+  applicationId String
+  application   Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  type          String
+  createdAt     DateTime     @default(now())
+}
+
+model ApplicationStatusHistory {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  status        String
+  note          String?
+  updatedBy     String?
+  createdAt     DateTime    @default(now())
+}
+
+model Office {
+  id           String   @id @default(cuid())
+  name         String
+  city         String
+  country      String
+  building     String
+  street       String
+  area         String?
+  postalCode   String?
+  email        String?
+  phone        String?
+  isPrimary    Boolean  @default(false)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ContactEnquiry {
+  id           String   @id @default(cuid())
+  name         String
+  email        String
+  phone        String?
+  country      String
+  organization String?
+  enquiryType  String
+  message      String
+  status       String   @default("NEW") // NEW, IN_PROGRESS, RESOLVED, ARCHIVED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model WebsiteSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
 }
 
 model AuditLog {
-  id            String       @id @default(cuid())
-  userId        String?
-  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  applicationId String?
-  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  action        String       // e.g. "APPLICATION_SUBMITTED", "APPLICATION_APPROVED", "APPLICATION_REJECTED", "CERTIFICATE_GENERATED", "ADMIN_LOGIN"
-  details       String?      @db.Text
-  ipAddress     String?
-  timestamp     DateTime     @default(now())
-  createdAt     DateTime     @default(now())
-
-  @@map("audit_logs")
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
 }
