@@ -144,13 +144,18 @@ export class CertificateService {
     }
 
     // 2. Status validation: Application MUST be in APPROVED status
-    if (application.status !== "APPROVED" && application.status !== "CERTIFICATE_GENERATED") {
+    if (application.status !== "APPROVED") {
+      if (application.status === "CERTIFICATE_GENERATED") {
+        throw new Error(
+          "Duplicate certificate generation rejected: Certificate has already been generated for this application."
+        );
+      }
       throw new Error(
         `Invalid status: Cannot generate certificate for application in ${application.status} status. The application must be approved first.`
       );
     }
 
-    // 3. Idempotency Check: Return existing certificate if already generated
+    // 3. Idempotency Check: Prevent duplicate certificate generation
     const existingCert = await db.certificate.findFirst({
       where: {
         OR: [
@@ -166,7 +171,9 @@ export class CertificateService {
     });
 
     if (existingCert) {
-      return toCertificateSummary(existingCert, existingCert.record, application);
+      throw new Error(
+        "Duplicate certificate generation rejected: Certificate has already been generated for this application."
+      );
     }
 
     // 4. Ensure RecordCategory exists
@@ -285,14 +292,14 @@ export class CertificateService {
       await tx.application.update({
         where: { id: applicationId },
         data: {
-          status: "APPROVED",
+          status: "CERTIFICATE_GENERATED",
         },
       });
 
       await tx.applicationStatusHistory.create({
         data: {
           applicationId,
-          status: "APPROVED",
+          status: "CERTIFICATE_GENERATED",
           note: `Certificate ${certificateNumber} generated with Record ID ${recordId}`,
           updatedBy: adminUserId || "SYSTEM",
         },

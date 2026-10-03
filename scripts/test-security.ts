@@ -1479,6 +1479,222 @@ async function runSecurityTests() {
     assert(!("internalNotes" in notFoundVerify), "TEST 27: Verification never exposes internalNotes");
   }
 
+  // ----------------------------------------------------
+  // TEST 20: Application Review Workflow, Adjudication Actions & State Machine Integrity
+  // ----------------------------------------------------
+  console.log("\nTEST 20: Application Review Workflow, Adjudication Actions & State Machine Integrity");
+  {
+    const {
+      getApplicationActions,
+      isStage1Lodged,
+      isStage2UnderReview,
+      isStage3Approved,
+      isStage3Rejected,
+      isStage4CertificateGenerated,
+      getStatusLabel,
+    } = await import("../src/lib/workflow");
+
+    // STAGE 1: EVIDENCE_SUBMITTED checks
+    const adminStage1 = getApplicationActions("EVIDENCE_SUBMITTED", Role.ADMIN);
+    assert(adminStage1.canStartReview === true, "TEST 1: EVIDENCE_SUBMITTED → Start Review visible for ADMIN");
+    assert(adminStage1.canApprove === false, "TEST 2: EVIDENCE_SUBMITTED → Approve hidden for ADMIN");
+    assert(adminStage1.canReject === false, "TEST 3: EVIDENCE_SUBMITTED → Reject hidden for ADMIN");
+    assert(adminStage1.canGenerateCertificate === false, "TEST 4: EVIDENCE_SUBMITTED → Generate Certificate hidden for ADMIN");
+
+    const superAdminStage1 = getApplicationActions("EVIDENCE_SUBMITTED", Role.SUPER_ADMIN);
+    assert(superAdminStage1.canStartReview === true, "TEST 5: EVIDENCE_SUBMITTED → Start Review visible for SUPER_ADMIN");
+    assert(superAdminStage1.canApprove === false, "TEST 6: EVIDENCE_SUBMITTED → Approve hidden for SUPER_ADMIN");
+
+    const voStage1 = getApplicationActions("EVIDENCE_SUBMITTED", Role.VERIFICATION_OFFICER);
+    assert(voStage1.canStartReview === true, "TEST 7: EVIDENCE_SUBMITTED → Start Review visible for VERIFICATION_OFFICER");
+    assert(voStage1.canApprove === false, "TEST 8: EVIDENCE_SUBMITTED → Approve hidden for VERIFICATION_OFFICER");
+
+    // STAGE 2: UNDER_INITIAL_REVIEW / UNDER_REVIEW checks
+    const adminStage2 = getApplicationActions("UNDER_INITIAL_REVIEW", Role.ADMIN);
+    assert(adminStage2.canApprove === true, "TEST 9: UNDER_INITIAL_REVIEW → Approve visible for ADMIN");
+    assert(adminStage2.canReject === true, "TEST 10: UNDER_INITIAL_REVIEW → Reject visible for ADMIN");
+    assert(adminStage2.canStartReview === false, "TEST 11: UNDER_INITIAL_REVIEW → Start Review hidden");
+    assert(adminStage2.canGenerateCertificate === false, "TEST 12: UNDER_INITIAL_REVIEW → Generate Certificate hidden");
+
+    const superAdminStage2 = getApplicationActions("UNDER_INITIAL_REVIEW", Role.SUPER_ADMIN);
+    assert(superAdminStage2.canApprove === true, "TEST 13: UNDER_INITIAL_REVIEW → Approve visible for SUPER_ADMIN");
+    assert(superAdminStage2.canReject === true, "TEST 14: UNDER_INITIAL_REVIEW → Reject visible for SUPER_ADMIN");
+
+    const voStage2 = getApplicationActions("UNDER_INITIAL_REVIEW", Role.VERIFICATION_OFFICER);
+    assert(voStage2.canApprove === false, "TEST 15: UNDER_INITIAL_REVIEW → Approve hidden for VERIFICATION_OFFICER");
+    assert(voStage2.canReject === false, "TEST 16: UNDER_INITIAL_REVIEW → Reject hidden for VERIFICATION_OFFICER");
+    assert(voStage2.isVerificationOfficerRestricted === true, "TEST 17: UNDER_INITIAL_REVIEW → Restriction notice active for VERIFICATION_OFFICER");
+
+    // STAGE 3: APPROVED checks
+    const adminStage3 = getApplicationActions("APPROVED", Role.ADMIN);
+    assert(adminStage3.canGenerateCertificate === true, "TEST 18: APPROVED → Generate Certificate visible for ADMIN");
+    assert(adminStage3.canApprove === false, "TEST 19: APPROVED → Approve hidden for ADMIN");
+    assert(adminStage3.canStartReview === false, "TEST 20: APPROVED → Start Review hidden for ADMIN");
+
+    const superAdminStage3 = getApplicationActions("APPROVED", Role.SUPER_ADMIN);
+    assert(superAdminStage3.canGenerateCertificate === true, "TEST 21: APPROVED → Generate Certificate visible for SUPER_ADMIN");
+
+    const voStage3 = getApplicationActions("APPROVED", Role.VERIFICATION_OFFICER);
+    assert(voStage3.canGenerateCertificate === false, "TEST 22: APPROVED → Generate Certificate hidden for VERIFICATION_OFFICER");
+
+    // STAGE 4: CERTIFICATE_GENERATED checks
+    const adminStage4 = getApplicationActions("CERTIFICATE_GENERATED", Role.ADMIN, { id: "mock_cert", recordId: "WBRE-123" });
+    assert(adminStage4.canViewCertificate === true, "TEST 23: CERTIFICATE_GENERATED → View Certificate visible");
+    assert(adminStage4.canDownloadCertificate === true, "TEST 24: CERTIFICATE_GENERATED → Download Certificate visible");
+    assert(adminStage4.canOpenVerification === true, "TEST 25: CERTIFICATE_GENERATED → Open Verification visible");
+    assert(adminStage4.canGenerateCertificate === false, "TEST 26: CERTIFICATE_GENERATED → Generate Certificate hidden");
+    assert(adminStage4.canStartReview === false, "TEST 27: CERTIFICATE_GENERATED → Start Review hidden");
+    assert(adminStage4.canApprove === false, "TEST 28: CERTIFICATE_GENERATED → Approve hidden");
+    assert(adminStage4.canReject === false, "TEST 29: CERTIFICATE_GENERATED → Reject hidden");
+
+    // Helper functions & Labels
+    assert(isStage1Lodged("EVIDENCE_SUBMITTED") === true, "TEST 30: EVIDENCE_SUBMITTED recognized as Stage 1");
+    assert(isStage1Lodged("SUBMITTED") === true, "TEST 31: SUBMITTED recognized as Stage 1");
+    assert(isStage2UnderReview("UNDER_INITIAL_REVIEW") === true, "TEST 32: UNDER_INITIAL_REVIEW recognized as Stage 2");
+    assert(isStage2UnderReview("UNDER_REVIEW") === true, "TEST 33: UNDER_REVIEW recognized as Stage 2");
+    assert(isStage3Approved("APPROVED") === true, "TEST 34: APPROVED recognized as Stage 3 Approved");
+    assert(isStage3Rejected("REJECTED") === true, "TEST 35: REJECTED recognized as Stage 3 Rejected");
+    assert(isStage4CertificateGenerated("CERTIFICATE_GENERATED") === true, "TEST 36: CERTIFICATE_GENERATED recognized as Stage 4");
+
+    assert(getStatusLabel("EVIDENCE_SUBMITTED") === "Evidence Submitted", "TEST 37: Human label for EVIDENCE_SUBMITTED is Evidence Submitted");
+    assert(getStatusLabel("UNDER_INITIAL_REVIEW") === "Under Review", "TEST 38: Human label for UNDER_INITIAL_REVIEW is Under Review");
+    assert(getStatusLabel("APPROVED") === "Approved", "TEST 39: Human label for APPROVED is Approved");
+    assert(getStatusLabel("REJECTED") === "Rejected", "TEST 40: Human label for REJECTED is Rejected");
+    assert(getStatusLabel("CERTIFICATE_GENERATED") === "Certificate Generated", "TEST 41: Human label for CERTIFICATE_GENERATED is Certificate Generated");
+
+    // Unknown status fallback
+    const unknownConfig = getApplicationActions("NON_EXISTENT_STATUS", Role.ADMIN);
+    assert(unknownConfig.isUnknownStatus === true, "TEST 42: Unknown status flags isUnknownStatus");
+    assert(unknownConfig.unknownStatusMessage?.includes("Workflow status requires administrator attention") === true, "TEST 43: Unknown status contains administrator attention message");
+    assert(unknownConfig.canStartReview === true, "TEST 44: Unknown status provides fallback Start Review action");
+
+    // Server-Side State Machine Guards
+    const { CertificateService } = await import("../src/features/certificates/certificate.service");
+    let certBlockedForEvidenceSubmitted = false;
+    try {
+      const origFindUnique = db.application.findUnique;
+      (db.application as any).findUnique = async () => ({
+        id: "mock_app_1",
+        status: "EVIDENCE_SUBMITTED",
+        applicantName: "Test",
+        proposedTitle: "Test",
+      });
+      try {
+        await CertificateService.generateCertificateForApplication("mock_app_1", "admin_id", Role.ADMIN);
+      } finally {
+        (db.application as any).findUnique = origFindUnique;
+      }
+    } catch (err: any) {
+      if (err.message.includes("must be approved first") || err.message.includes("Invalid status")) {
+        certBlockedForEvidenceSubmitted = true;
+      }
+    }
+    assert(certBlockedForEvidenceSubmitted, "TEST 45: EVIDENCE_SUBMITTED → CERTIFICATE_GENERATED rejected server-side");
+
+    let certBlockedDuplicate = false;
+    try {
+      const origFindUnique = db.application.findUnique;
+      (db.application as any).findUnique = async () => ({
+        id: "mock_app_2",
+        status: "CERTIFICATE_GENERATED",
+        applicantName: "Test",
+        proposedTitle: "Test",
+      });
+      try {
+        await CertificateService.generateCertificateForApplication("mock_app_2", "admin_id", Role.ADMIN);
+      } finally {
+        (db.application as any).findUnique = origFindUnique;
+      }
+    } catch (err: any) {
+      if (err.message.includes("Duplicate certificate generation rejected") || err.message.includes("already been generated")) {
+        certBlockedDuplicate = true;
+      }
+    }
+    assert(certBlockedDuplicate, "TEST 46: Duplicate certificate generation rejected");
+
+    let approvalBlockedFromEvidenceSubmitted = false;
+    try {
+      const origFindUnique = db.application.findUnique;
+      (db.application as any).findUnique = async () => ({
+        id: "mock_app_3",
+        status: "EVIDENCE_SUBMITTED",
+        applicantName: "Test",
+        categoryName: "General",
+        proposedTitle: "Test",
+        description: "Test description",
+        location: "London",
+      });
+      try {
+        await ApplicationService.updateStatus({
+          applicationId: "mock_app_3",
+          status: "APPROVED",
+          actor: { userId: "admin", role: Role.ADMIN },
+        });
+      } finally {
+        (db.application as any).findUnique = origFindUnique;
+      }
+    } catch (err: any) {
+      if (err.message.includes("must be under review before it can be approved") || err.message.includes("Invalid transition")) {
+        approvalBlockedFromEvidenceSubmitted = true;
+      }
+    }
+    assert(approvalBlockedFromEvidenceSubmitted, "TEST 47: EVIDENCE_SUBMITTED → APPROVED rejected server-side");
+
+    let approvalBlockedFromRejected = false;
+    try {
+      const origFindUnique = db.application.findUnique;
+      (db.application as any).findUnique = async () => ({
+        id: "mock_app_4",
+        status: "REJECTED",
+        applicantName: "Test",
+        categoryName: "General",
+        proposedTitle: "Test",
+        description: "Test description",
+        location: "London",
+      });
+      try {
+        await ApplicationService.updateStatus({
+          applicationId: "mock_app_4",
+          status: "APPROVED",
+          actor: { userId: "admin", role: Role.ADMIN },
+        });
+      } finally {
+        (db.application as any).findUnique = origFindUnique;
+      }
+    } catch (err: any) {
+      if (err.message.includes("Cannot approve an application that has already been rejected") || err.message.includes("Invalid transition")) {
+        approvalBlockedFromRejected = true;
+      }
+    }
+    assert(approvalBlockedFromRejected, "TEST 48: REJECTED → APPROVED rejected server-side");
+
+    // Unauthenticated action rejected on PATCH /api/applications/[id]
+    const appRoute = await import("../src/app/api/applications/[id]/route");
+    const unauthPatchReq = new NextRequest("http://localhost:3000/api/applications/app_test", {
+      method: "PATCH",
+      body: JSON.stringify({ status: "APPROVED" }),
+    });
+    const unauthPatchRes = await appRoute.PATCH(unauthPatchReq, {
+      params: Promise.resolve({ id: "app_test" }),
+    });
+    assert(unauthPatchRes.status === 401, "TEST 49: Unauthenticated action rejected");
+
+    // Verification Officer forbidden from approval in ApplicationService
+    let voApprovalBlocked = false;
+    try {
+      await ApplicationService.updateStatus({
+        applicationId: "mock_app_5",
+        status: "APPROVED",
+        actor: { userId: "vo_id", role: Role.VERIFICATION_OFFICER },
+      });
+    } catch (err: any) {
+      if (err.message.includes("FORBIDDEN") || err.message.includes("Verification Officers are not permitted")) {
+        voApprovalBlocked = true;
+      }
+    }
+    assert(voApprovalBlocked, "TEST 50: Unauthorized role rejected");
+  }
+
   console.log(`\n==========================================`);
   console.log(`ALL TESTS PASSED: ${passedTests}/${totalTests}`);
   console.log(`==========================================\n`);

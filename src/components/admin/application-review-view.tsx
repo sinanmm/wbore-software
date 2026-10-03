@@ -26,6 +26,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
 import { CertificatePreview } from "@/components/certificate/certificate-preview";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import {
+  getApplicationActions,
+  isStage1Lodged,
+  isStage2UnderReview,
+  isStage3Approved,
+  isStage3Rejected,
+  isStage4CertificateGenerated,
+} from "@/lib/workflow";
 
 export function ApplicationReviewView({
   initialApplication,
@@ -51,14 +59,20 @@ export function ApplicationReviewView({
   const [rejectionReason, setRejectionReason] = useState("");
   const [requestedInfo, setRequestedInfo] = useState("");
 
-  const isPending = application.status === "SUBMITTED" || application.status === "PENDING";
-  const isUnderReview =
-    application.status === "UNDER_INITIAL_REVIEW" ||
-    application.status === "UNDER_REVIEW" ||
-    application.status === "UNDER_VERIFICATION";
-  const isApproved = application.status === "APPROVED";
-  const hasCertificate = !!application.certificate || application.status === "CERTIFICATE_GENERATED";
-  const isRejected = application.status === "REJECTED";
+  const actions = getApplicationActions(
+    application.status,
+    currentUserRole,
+    application.certificate
+  );
+
+  const isPending = isStage1Lodged(application.status);
+  const isUnderReview = isStage2UnderReview(application.status);
+  const isApproved = isStage3Approved(application.status);
+  const hasCertificate = isStage4CertificateGenerated(
+    application.status,
+    !!application.certificate
+  );
+  const isRejected = isStage3Rejected(application.status);
   const isVerificationOfficer =
     currentUserRole === "VERIFICATION_OFFICER" ||
     currentUserRole === "REVIEWER";
@@ -423,8 +437,8 @@ export function ApplicationReviewView({
             </div>
 
             <div className="space-y-3">
-              {/* If PENDING / SUBMITTED: Show Start Review Button */}
-              {isPending && (
+              {/* STAGE 1: START REVIEW (Allowed for SUPER_ADMIN, ADMIN, VERIFICATION_OFFICER, REVIEWER) */}
+              {actions.canStartReview && (
                 <Button
                   variant="gold"
                   size="md"
@@ -448,7 +462,7 @@ export function ApplicationReviewView({
                         Adjudication Restricted
                       </p>
                       <p>
-                        You can review this application, but approval or rejection requires an authorized administrator.
+                        Verification Officer can review evidence but cannot approve or reject applications.
                       </p>
                     </div>
                   ) : (
@@ -515,7 +529,7 @@ export function ApplicationReviewView({
                       className="w-full font-bold shadow-gold justify-start"
                     >
                       <Award className="h-4 w-4 mr-2" />
-                      GENERATE CERTIFICATE
+                      Generate Certificate
                     </Button>
                   ) : (
                     <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
@@ -603,6 +617,35 @@ export function ApplicationReviewView({
                   </div>
                 </div>
               )}
+
+              {/* UNKNOWN / ATTENTION REQUIRED STATUS */}
+              {actions.isUnknownStatus && (
+                <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-300 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertTriangle className="h-4 w-4" />
+                    Workflow Attention Required
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Workflow status requires administrator attention.
+                  </p>
+                  <div className="p-2 rounded bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-amber-200">
+                    Status: <strong className="text-white">{application.status || "UNKNOWN"}</strong>
+                  </div>
+                  {actions.canStartReview && (
+                    <Button
+                      variant="gold"
+                      size="sm"
+                      onClick={() => handleStatusChange("UNDER_REVIEW")}
+                      isLoading={actionLoading}
+                      disabled={actionLoading}
+                      className="w-full font-bold shadow-gold justify-start mt-2"
+                    >
+                      <Clock className="h-4 w-4 mr-2" />
+                      Start Review
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -647,16 +690,28 @@ export function ApplicationReviewView({
         <div className="space-y-4 text-xs">
           <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
             <div>
-              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Applicant:</span>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Applicant Name:</span>
               <p className="text-sm font-bold text-white mt-0.5">{application.applicantName}</p>
             </div>
             <div>
-              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Achievement:</span>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Achievement Title:</span>
               <p className="text-xs font-medium text-amber-300 mt-0.5">{application.achievementTitle || application.proposedTitle}</p>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Category:</span>
+                <p className="text-xs font-medium text-slate-200 mt-0.5">{application.category || application.categoryName}</p>
+              </div>
+              <div>
+                <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Country:</span>
+                <p className="text-xs font-medium text-slate-200 mt-0.5">{application.country || "—"}</p>
+              </div>
+            </div>
             <div>
-              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Category:</span>
-              <p className="text-xs font-medium text-slate-200 mt-0.5">{application.category || application.categoryName}</p>
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Evidence Count:</span>
+              <p className="text-xs font-medium text-slate-200 mt-0.5">
+                {(application.evidenceFiles || application.evidences || []).length} file(s) in evidence dossier
+              </p>
             </div>
           </div>
 

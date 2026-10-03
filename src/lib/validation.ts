@@ -45,7 +45,14 @@ export const adminLoginSchema = z.object({
  */
 export const updateApplicationStatusSchema = z
   .object({
-    status: z.enum(["PENDING", "UNDER_REVIEW", "APPROVED", "REJECTED"]),
+    status: z.enum([
+      "PENDING",
+      "SUBMITTED",
+      "UNDER_REVIEW",
+      "UNDER_INITIAL_REVIEW",
+      "APPROVED",
+      "REJECTED",
+    ]),
     internalNotes: z.string().max(10000).optional(),
     rejectionReason: z.string().max(2000).optional(),
     requestedInfo: z.string().max(2000).optional(),

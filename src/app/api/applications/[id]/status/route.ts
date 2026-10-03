@@ -38,7 +38,10 @@ export async function POST(
     const { status, internalNotes, rejectionReason, requestedInfo } = parsed.data;
 
     // RBAC: Check start review permission
-    if (status === "UNDER_REVIEW" && !canStartReview(session.role)) {
+    if (
+      (status === "UNDER_REVIEW" || status === "UNDER_INITIAL_REVIEW") &&
+      !canStartReview(session.role)
+    ) {
       return NextResponse.json(
         { error: "Forbidden: You are not permitted to start reviewing applications." },
         { status: 403 }

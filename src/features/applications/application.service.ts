@@ -9,6 +9,7 @@ import {
 } from "@/types";
 import { ApplicationSubmissionInput } from "@/lib/validation";
 import { canApproveApplication, canRejectApplication, canStartReview } from "@/lib/rbac";
+import { isStage1Lodged, isStage2UnderReview } from "@/lib/workflow";
 
 export interface CreateEvidenceFileInput {
   fileName: string;
@@ -297,8 +298,15 @@ export class ApplicationService {
     const where: any = {};
 
     if (status) {
-      if (status === "PENDING" || status === "SUBMITTED") {
-        where.status = { in: ["SUBMITTED", "PENDING"] };
+      if (
+        status === "PENDING" ||
+        status === "SUBMITTED" ||
+        status === "EVIDENCE_SUBMITTED" ||
+        status === "LODGED"
+      ) {
+        where.status = {
+          in: ["SUBMITTED", "PENDING", "EVIDENCE_SUBMITTED", "LODGED"],
+        };
       } else if (status === "UNDER_REVIEW" || status === "UNDER_INITIAL_REVIEW") {
         where.status = { in: ["UNDER_INITIAL_REVIEW", "UNDER_REVIEW", "UNDER_VERIFICATION"] };
       } else if (status === "APPROVED" || status === "CERTIFICATE_GENERATED") {
@@ -447,12 +455,23 @@ export class ApplicationService {
         throw new Error("Invalid transition: Cannot approve an application that has already been rejected.");
       }
 
-      if (existing.status === "SUBMITTED" || existing.status === "PENDING") {
+      if (existing.status === "CERTIFICATE_GENERATED") {
+        throw new Error("Invalid transition: Certificate has already been generated for this application.");
+      }
+
+      if (
+        isStage1Lodged(existing.status) ||
+        existing.status === "SUBMITTED" ||
+        existing.status === "PENDING" ||
+        existing.status === "EVIDENCE_SUBMITTED"
+      ) {
         throw new Error("Invalid transition: Application must be under review before it can be approved.");
       }
 
-      if (existing.status === "CERTIFICATE_GENERATED") {
-        throw new Error("Invalid transition: Certificate has already been generated for this application.");
+      if (!isStage2UnderReview(existing.status)) {
+        throw new Error(
+          `Invalid transition: Application must be under review before it can be approved. Current status: ${existing.status}`
+        );
       }
 
       if (
@@ -500,7 +519,12 @@ export class ApplicationService {
         throw new Error("Invalid transition: Cannot reject an application after a certificate has been generated.");
       }
 
-      if (existing.status === "SUBMITTED" || existing.status === "PENDING") {
+      if (
+        isStage1Lodged(existing.status) ||
+        existing.status === "SUBMITTED" ||
+        existing.status === "PENDING" ||
+        existing.status === "EVIDENCE_SUBMITTED"
+      ) {
         throw new Error("Invalid transition: Application must be under review before it can be rejected.");
       }
 
@@ -548,6 +572,12 @@ export class ApplicationService {
       if (existing.status === "CERTIFICATE_GENERATED") {
         throw new Error(
           "Invalid transition: Cannot move an application with an issued certificate back into review."
+        );
+      }
+
+      if (existing.status === "APPROVED") {
+        throw new Error(
+          "Invalid transition: Cannot move an approved application back into review."
         );
       }
 
@@ -668,7 +698,9 @@ export class ApplicationService {
       recentAuditLogs,
     ] = await Promise.all([
       db.application.count(),
-      db.application.count({ where: { status: { in: ["SUBMITTED", "PENDING"] } } }),
+      db.application.count({
+        where: { status: { in: ["SUBMITTED", "PENDING", "EVIDENCE_SUBMITTED", "LODGED"] } },
+      }),
       db.application.count({
         where: { status: { in: ["UNDER_INITIAL_REVIEW", "UNDER_REVIEW", "UNDER_VERIFICATION"] } },
       }),
